@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Leak guard: maintainers' private patterns, which name the material they guard
+/.leak-patterns.private

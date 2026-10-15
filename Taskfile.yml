@@ -79,6 +79,26 @@ tasks:
           exit 1
         fi
 
+  leak-guard:
+    desc: Fail when a tracked or untracked, non-ignored file carries private material in its path or content
+    cmd: |
+      if uv run python scripts/leak_guard.py tree; then
+        echo "OK: leak guard found no private material in the working tree"
+      else
+        echo "FAIL: leak guard found private material in the working tree"
+        exit 1
+      fi
+
+  leak-guard:history:
+    desc: Fail when any commit reachable from any ref carries private material in its message, paths, or file contents
+    cmd: |
+      if uv run python scripts/leak_guard.py history; then
+        echo "OK: leak guard found no private material in the history"
+      else
+        echo "FAIL: leak guard found private material in the history"
+        exit 1
+      fi
+
   test:
     desc: Run the unit test suite
     cmd: |
@@ -129,9 +149,10 @@ tasks:
       if [ -s .git/COMMIT_EDITMSG ]; then
         uv run cz check --commit-msg-file .git/COMMIT_EDITMSG
         MSG_STATUS=$?
+        uv run python scripts/leak_guard.py message .git/COMMIT_EDITMSG || MSG_STATUS=1
       fi
       if [ "$PRE_COMMIT_STATUS" -ne 0 ] || [ "$MSG_STATUS" -ne 0 ]; then
-        echo "FAIL: pre-commit hooks or the commit message check failed"
+        echo "FAIL: pre-commit hooks or the commit message checks failed"
         exit 1
       fi
       echo "OK: pre-commit hooks passed"

@@ -58,6 +58,7 @@ include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["scripts"]
 
 [tool.ruff.lint]
 preview = true
@@ -79,6 +80,7 @@ major_version_zero = true
 
 [tool.ty]
 environment.python-version = "3.13"
+environment.extra-paths = ["scripts"]
 
 [tool.ty.src]
 exclude = ["build/", "dist/"]

@@ -62,3 +62,32 @@ jobs:
 
             - name: Build distribution
               run: task build
+
+    leak-guard-history:
+        name: task leak-guard:history
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout with full history
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Install Task
+              uses: arduino/setup-task@v2
+              with:
+                  version: 3.x
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Install uv with cache
+              uses: astral-sh/setup-uv@v6
+              with:
+                  version: "0.10.12"
+                  python-version: "3.13.3"
+                  enable-cache: true
+                  cache-dependency-glob: |
+                      uv.lock
+                      pyproject.toml
+
+            - name: Scan every reachable commit
+              run: task leak-guard:history
