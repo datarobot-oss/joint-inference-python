@@ -186,3 +186,38 @@ def test_main_returns_failure_on_findings(
     assert "notes.md:1: [proprietary-header]" in output
     (repo / "notes.md").write_text("clean\n", encoding="utf-8")
     assert leak_guard.main(["tree"]) == 0
+
+
+def test_history_range_scans_only_the_commits_it_selects(repo: Path) -> None:
+    (repo / "notes.md").write_text(f"{HEADER}\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", f"docs: Add notes for deployment {OBJECT_ID}")
+    _git(repo, "tag", "published")
+    (repo / "notes.md").write_text("clean\n", encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", "docs: Clean notes")
+    assert (
+        leak_guard.scan_history(repo, leak_guard.PUBLIC_RULES, ["published..HEAD"])
+        == []
+    )
+    (repo / "new.md").write_text("Phase" + " 7\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "docs: Add new notes")
+    findings = leak_guard.scan_history(
+        repo, leak_guard.PUBLIC_RULES, ["published..HEAD"]
+    )
+    assert [(finding.rule, finding.excerpt) for finding in findings] == [
+        ("planning-label", "Phase" + " 7")
+    ]
+
+
+def test_main_history_accepts_revisions(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (repo / "notes.md").write_text(f"{HEADER}\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "docs: Add notes")
+    _git(repo, "tag", "published")
+    monkeypatch.chdir(repo)
+    assert leak_guard.main(["history"]) == 1
+    assert leak_guard.main(["history", "published..HEAD"]) == 0
+    assert "leak guard: no findings" in capsys.readouterr().out

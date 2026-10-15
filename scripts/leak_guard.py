@@ -31,6 +31,7 @@ from pathlib import Path
 
 PRIVATE_RULES_FILE = ".leak-patterns.private"
 BINARY_SNIFF_BYTES = 8192
+EVERY_REF = ("--all",)
 PUBLIC_DATAROBOT_REPOSITORIES = ("joint-client-python", "joint-inference-python")
 PUBLIC_DATAROBOT_HOSTS = ("app", "app.eu", "app.jp", "docs", "www")
 
@@ -271,7 +272,7 @@ def _read_blobs(root: Path, shas: Sequence[str]) -> dict[str, bytes]:
 
 
 def scan_history(
-    root: Path, rules: Sequence[Rule], revisions: Sequence[str] = ("--all",)
+    root: Path, rules: Sequence[Rule], revisions: Sequence[str] = EVERY_REF
 ) -> list[Finding]:
     """Scan every commit message, path, and blob that ``revisions`` select.
 
@@ -332,7 +333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.mode == "tree":
         findings = scan_tree(root, rules)
     elif args.mode == "history":
-        findings = scan_history(root, rules, args.revisions or ("--all",))
+        findings = scan_history(root, rules, args.revisions or EVERY_REF)
     else:
         findings = scan_message(args.message_file, rules)
     for finding in findings:

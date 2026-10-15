@@ -90,9 +90,9 @@ tasks:
       fi
 
   leak-guard:history:
-    desc: Fail when any commit reachable from any ref carries private material in its message, paths, or file contents
+    desc: "Fail when any commit reachable from any ref carries private material in its message, paths, or file contents (narrow it with revisions: task leak-guard:history -- origin/main..HEAD)"
     cmd: |
-      if uv run python scripts/leak_guard.py history; then
+      if uv run python scripts/leak_guard.py history {{.CLI_ARGS}}; then
         echo "OK: leak guard found no private material in the history"
       else
         echo "FAIL: leak guard found private material in the history"

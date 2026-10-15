@@ -21,7 +21,7 @@ task pre-commit   # run every check that gates a commit
 | `task coverage` | Run the unit tests and enforce the coverage floor |
 | `task check` | Read-only static checks: typos, Ruff lint and format check, ty |
 | `task leak-guard` | Fail when a file in the working tree carries private material in its path or content |
-| `task leak-guard:history` | Fail when any commit reachable from any ref carries private material in its message, paths, or files |
+| `task leak-guard:history` | Fail when any commit reachable from any ref carries private material in its message, paths, or files; pass revisions to narrow the scan (`task leak-guard:history -- origin/main..HEAD`) |
 | `task format` | Apply the Ruff formatter |
 | `task pre-commit` | Run every pre-commit hook on all files and check the pending commit message |
 | `task build` | Build the source distribution and wheel into `dist/` |
