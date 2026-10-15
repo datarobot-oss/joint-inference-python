@@ -1,0 +1,84 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jointfm-inference"
+version = "0.1.0"
+description = "Inference runner that serves JointFM checkpoints over HTTP"
+readme = "README.md"
+requires-python = ">=3.13"
+authors = [
+    { name = "Stefan Hackmann", email = "stefan.hackmann@datarobot.com" },
+]
+keywords = ["forecasting", "inference", "jointfm"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    # PyPI rejects every upload that carries this classifier.
+    "Private :: Do Not Upload",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/datarobot/joint-inference-python"
+
+[dependency-groups]
+dev = [
+    "commitizen>=3.31",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "ruff",
+    "ty",
+]
+
+[tool.uv]
+required-version = ">=0.10"
+exclude-newer = "14 days"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jointfm_inference"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/README.md",
+    "/pyproject.toml",
+    "/src/jointfm_inference",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
+select = ["E4", "E7", "E9", "F", "D100", "D101", "D102", "D103"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D100", "D101", "D102", "D103"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+version_scheme = "semver"
+tag_format = "v$version"
+major_version_zero = true
+
+[tool.ty]
+environment.python-version = "3.13"
+
+[tool.ty.src]
+exclude = ["build/", "dist/"]

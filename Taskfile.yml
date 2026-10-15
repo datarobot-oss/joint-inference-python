@@ -1,0 +1,215 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+silent: true
+
+vars:
+  PYTHON_VERSION: '{{.PYTHON_VERSION | default "3.13.3"}}'
+  TYPOS_VERSION: '{{.TYPOS_VERSION | default "1.45.1"}}'
+  COVERAGE_FAIL_UNDER: '{{.COVERAGE_FAIL_UNDER | default "90"}}'
+
+tasks:
+  default:
+    cmd: task --list --sort alphanumeric
+
+  run:
+    desc: "Run a command inside the project environment (usage: task run -- python ...)"
+    cmd: uv run {{.CLI_ARGS}}
+
+  setup:
+    desc: Create or reuse the local Python environment and install repo tooling
+    cmds:
+      - uv venv --allow-existing --python {{.PYTHON_VERSION}}
+      - uv sync --all-groups
+      - uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
+      - task: install:ripgrep
+      - task: install:typos
+      - cmd: 'echo "OK: setup complete; activate the environment with . .venv/bin/activate"'
+
+  lint:
+    desc: Run Ruff lint checks (read-only)
+    cmd: |
+      if uv run ruff check .; then
+        echo "OK: ruff lint passed"
+      else
+        echo "FAIL: ruff lint reported issues"
+        exit 1
+      fi
+
+  format:
+    desc: Run the Ruff formatter (rewrites files in place)
+    cmd: |
+      if uv run ruff format .; then
+        echo "OK: ruff format applied"
+      else
+        echo "FAIL: ruff format could not format every file"
+        exit 1
+      fi
+
+  format:check:
+    desc: Check Ruff formatting without rewriting files
+    cmd: |
+      if uv run ruff format --check .; then
+        echo "OK: ruff format check passed"
+      else
+        echo "FAIL: files need formatting; run task format"
+        exit 1
+      fi
+
+  typecheck:
+    desc: Run ty static type checks
+    cmd: |
+      if uv run ty check --output-format concise --error-on-warning; then
+        echo "OK: ty type check passed"
+      else
+        echo "FAIL: ty type check reported issues"
+        exit 1
+      fi
+
+  typos:
+    desc: Run the spelling checker
+    cmds:
+      - task: install:typos
+      - |
+        TYPOS="$(command -v typos || echo "$HOME/.local/bin/typos")"
+        if "$TYPOS" --config typos.toml --force-exclude --sort .; then
+          echo "OK: typos found no misspellings"
+        else
+          echo "FAIL: typos reported misspellings"
+          exit 1
+        fi
+
+  test:
+    desc: Run the unit test suite
+    cmd: |
+      if uv run pytest -n auto {{.CLI_ARGS}}; then
+        echo "OK: tests passed"
+      else
+        echo "FAIL: tests failed"
+        exit 1
+      fi
+
+  coverage:
+    desc: Run the unit test suite with coverage enforcement
+    cmd: |
+      if uv run pytest -q -n auto -p no:cacheprovider --cov=jointfm_inference --cov-report=term-missing:skip-covered --cov-fail-under={{.COVERAGE_FAIL_UNDER}}; then
+        echo "OK: tests passed with coverage at or above {{.COVERAGE_FAIL_UNDER}}%"
+      else
+        echo "FAIL: tests failed or coverage is below {{.COVERAGE_FAIL_UNDER}}%"
+        exit 1
+      fi
+
+  build:
+    desc: Build the source distribution and wheel into dist/
+    cmd: |
+      rm -rf dist
+      if uv build; then
+        echo "OK: built $(ls dist | tr '\n' ' ')"
+      else
+        echo "FAIL: uv build failed"
+        exit 1
+      fi
+
+  check:
+    desc: Run static code quality checks (read-only; no file modifications)
+    cmds:
+      - task: typos
+      - task: lint
+      - task: format:check
+      - task: typecheck
+      - cmd: 'echo "OK: all static checks passed"'
+
+  pre-commit:
+    desc: Run every pre-commit hook on all files and check the pending commit message
+    cmd: |
+      set +e
+      uv run pre-commit run --all-files
+      PRE_COMMIT_STATUS=$?
+      MSG_STATUS=0
+      if [ -s .git/COMMIT_EDITMSG ]; then
+        uv run cz check --commit-msg-file .git/COMMIT_EDITMSG
+        MSG_STATUS=$?
+      fi
+      if [ "$PRE_COMMIT_STATUS" -ne 0 ] || [ "$MSG_STATUS" -ne 0 ]; then
+        echo "FAIL: pre-commit hooks or the commit message check failed"
+        exit 1
+      fi
+      echo "OK: pre-commit hooks passed"
+
+  install:ripgrep:
+    desc: Install ripgrep using the available system package manager
+    cmd: |
+      if command -v rg >/dev/null 2>&1; then
+        echo "OK: ripgrep already installed: $(command -v rg)"
+        exit 0
+      fi
+      if command -v apt >/dev/null 2>&1; then
+        sudo apt update && sudo apt install -y ripgrep
+      elif command -v dnf >/dev/null 2>&1; then
+        rpm -q spal-release >/dev/null 2>&1 || sudo dnf install -y spal-release
+        sudo dnf install -y ripgrep
+      elif command -v yum >/dev/null 2>&1; then
+        sudo yum install -y ripgrep
+      elif command -v brew >/dev/null 2>&1; then
+        brew install ripgrep
+      else
+        echo "FAIL: no supported package manager found; install ripgrep manually, then rerun task setup"
+        exit 1
+      fi
+      echo "OK: installed ripgrep: $(command -v rg)"
+
+  install:typos:
+    desc: Install typos using Homebrew when available, otherwise download a release binary with curl
+    cmd: |
+      LOCAL_TYPOS="$HOME/.local/bin/typos"
+      if command -v typos >/dev/null 2>&1; then
+        echo "OK: typos already installed: $(command -v typos)"
+        exit 0
+      fi
+      if [ -x "$LOCAL_TYPOS" ]; then
+        echo "OK: typos already installed: $LOCAL_TYPOS"
+        exit 0
+      fi
+      if command -v brew >/dev/null 2>&1; then
+        if brew list typos-cli >/dev/null 2>&1 || brew install typos-cli; then
+          if command -v typos >/dev/null 2>&1; then
+            echo "OK: installed typos via Homebrew: $(command -v typos)"
+            exit 0
+          fi
+        fi
+      fi
+      for TOOL in curl tar install; do
+        if ! command -v "$TOOL" >/dev/null 2>&1; then
+          echo "FAIL: $TOOL is required to install typos; install it or typos manually, then rerun task setup"
+          exit 1
+        fi
+      done
+      VERSION="{{.TYPOS_VERSION}}"
+      ARCH="$(uname -m)"
+      case "$ARCH" in
+        x86_64|amd64) ARCH="x86_64" ;;
+        arm64|aarch64) ARCH="aarch64" ;;
+        *)
+          echo "FAIL: unsupported typos architecture: $ARCH"
+          exit 1
+          ;;
+      esac
+      OS_NAME="$(uname -s)"
+      case "$OS_NAME" in
+        Darwin) TARGET="$ARCH-apple-darwin" ;;
+        Linux) TARGET="$ARCH-unknown-linux-musl" ;;
+        *)
+          echo "FAIL: unsupported operating system: $OS_NAME (supported: Ubuntu, Amazon Linux, macOS)"
+          exit 1
+          ;;
+      esac
+      ARCHIVE_NAME="typos-v${VERSION}-${TARGET}.tar.gz"
+      DOWNLOAD_URL="https://github.com/crate-ci/typos/releases/download/v${VERSION}/${ARCHIVE_NAME}"
+      INSTALL_DIR="$HOME/.local/bin"
+      TMP_DIR="$(mktemp -d)"
+      trap 'rm -rf "$TMP_DIR"' EXIT
+      curl -fsSL "$DOWNLOAD_URL" -o "$TMP_DIR/$ARCHIVE_NAME"
+      mkdir -p "$INSTALL_DIR"
+      tar -xzf "$TMP_DIR/$ARCHIVE_NAME" -C "$TMP_DIR"
+      install "$TMP_DIR/typos" "$INSTALL_DIR/typos"
+      echo "OK: installed typos to $INSTALL_DIR/typos"

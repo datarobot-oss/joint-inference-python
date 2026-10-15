@@ -1,0 +1,63 @@
+[files]
+extend-exclude = [
+    ".env",
+    ".git",
+    ".venv",
+    ".pytest_cache",
+    "__pycache__",
+    "build",
+    "dist",
+    "uv.lock",
+    "**/.ruff_cache",
+    "**/*.ipynb",
+    "**/*.pt",
+]
+ignore-hidden = false
+ignore-files = false
+ignore-dot = false
+ignore-vcs = false
+ignore-global = false
+ignore-parent = false
+
+[default]
+locale = "en-us"
+
+[default.extend-words]
+"DataRobot" = "DataRobot"
+"JointFM" = "JointFM"
+"dtype" = "dtype"
+"metadata" = "metadata"
+
+"analyse" = "analyze"
+"analysed" = "analyzed"
+"artefact" = "artifact"
+"artefacts" = "artifacts"
+"behaviour" = "behavior"
+"behaviours" = "behaviors"
+"favour" = "favor"
+"initialise" = "initialize"
+"initialised" = "initialized"
+"labelled" = "labeled"
+"labelling" = "labeling"
+"modelled" = "modeled"
+"modelling" = "modeling"
+"normalisation" = "normalization"
+"normalise" = "normalize"
+"normalised" = "normalized"
+"optimisation" = "optimization"
+"optimise" = "optimize"
+"optimised" = "optimized"
+"serialise" = "serialize"
+
+[default.extend-identifiers]
+"DataRobot" = "DataRobot"
+"JointFM" = "JointFM"
+"jointfm" = "jointfm"
+"dtype" = "dtype"
+"metadata" = "metadata"
+
+[type.md]
+extend-ignore-re = [
+    "(?s)```.*?```",
+    "`[^`\\n]+`",
+]
