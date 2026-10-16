@@ -144,16 +144,16 @@ def test_the_session_reports_what_the_mounted_checkpoint_serves() -> None:
     assert not model.training
 
 
-def test_a_checkpoint_without_an_envelope_reports_none() -> None:
+def test_a_checkpoint_without_an_envelope_is_refused() -> None:
+    """Every served model reports the request sizes it was built for."""
     model = tiny_model()
     checkpoint = checkpoint_mapping(model)
     del checkpoint[CHECKPOINT_INFERENCE_METADATA_KEY][CHECKPOINT_CAPACITY_ENVELOPE_KEY]
 
-    session = JointFMInferenceSession(
-        model, model.cfg, checkpoint, generation=JOINTFM_1_GENERATION
-    )
-
-    assert session.capacity_envelope is None
+    with pytest.raises(ValueError, match="missing 'data_generation'"):
+        JointFMInferenceSession(
+            model, model.cfg, checkpoint, generation=JOINTFM_1_GENERATION
+        )
 
 
 def test_a_checkpoint_without_time_index_support_is_refused() -> None:

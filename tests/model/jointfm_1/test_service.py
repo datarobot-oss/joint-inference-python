@@ -15,7 +15,6 @@ import torch
 from scipy import stats
 
 from jointfm_inference.model.checkpoint import (
-    CHECKPOINT_CAPACITY_ENVELOPE_KEY,
     CHECKPOINT_INFERENCE_METADATA_KEY,
     CHECKPOINT_TIME_INDEX_SUPPORT_KEY,
 )
@@ -587,30 +586,6 @@ def test_health_payload_reports_the_served_jointfm_1_contract() -> None:
         "max_concurrent_requests": 1,
         "data_generation": TINY_CAPACITY_ENVELOPE,
     }
-
-
-def test_health_payload_reports_no_envelope_for_a_checkpoint_without_one() -> None:
-    model = _FixedParameterJointFM()
-    checkpoint = checkpoint_mapping(model)
-    del _inference_metadata(checkpoint)[CHECKPOINT_CAPACITY_ENVELOPE_KEY]
-
-    payload = _service_and_model(model, checkpoint=checkpoint)[0].health_payload()
-
-    assert payload["max_sample_count"] == _MAX_SAMPLE_COUNT
-    assert payload["data_generation"] is None
-
-
-def test_health_payload_reports_only_the_capacity_envelope_fields() -> None:
-    """Keys the checkpoint block carries beyond the envelope never reach a client."""
-    model = _FixedParameterJointFM()
-    checkpoint = checkpoint_mapping(model)
-    _inference_metadata(checkpoint)[CHECKPOINT_CAPACITY_ENVELOPE_KEY]["notes"] = (
-        "unreported"
-    )
-
-    payload = _service_and_model(model, checkpoint=checkpoint)[0].health_payload()
-
-    assert payload["data_generation"] == TINY_CAPACITY_ENVELOPE
 
 
 def test_service_serves_only_the_time_index_modes_the_checkpoint_supports() -> None:

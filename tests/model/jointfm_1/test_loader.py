@@ -6,6 +6,13 @@ from typing import Any
 import pytest
 import torch
 
+from jointfm_inference.model.checkpoint import (
+    CHECKPOINT_FORMAT_VERSION_KEY,
+    CHECKPOINT_GENERATION_KEY,
+    CHECKPOINT_MODEL_STATE_KEY,
+    CHECKPOINT_RUNTIME_METADATA_KEY,
+    CHECKPOINT_WEIGHTS_DTYPE_KEY,
+)
 from jointfm_inference.model.jointfm_1.loader import load_model_from_checkpoint
 from tests.support.models import TINY_CONFIG, checkpoint_mapping, tiny_model
 
@@ -34,37 +41,37 @@ def test_a_checkpoint_rebuilds_the_network_that_wrote_it() -> None:
         torch.testing.assert_close(loaded[key], value)
 
 
-@pytest.mark.parametrize(
-    "missing", ["cfg", "model_state", "runtime_metadata", "inference_metadata"]
-)
-def test_a_missing_top_level_entry_is_refused(missing: str) -> None:
-    checkpoint = _checkpoint()
-    del checkpoint[missing]
-    with pytest.raises(
-        ValueError, match=rf"not a JointFM 1 checkpoint: missing \['{missing}'\]"
-    ):
-        load_model_from_checkpoint(checkpoint)
+def test_weights_stored_in_bf16_load_into_float32_parameters() -> None:
+    saved = tiny_model(seed=3)
+    checkpoint = checkpoint_mapping(saved)
+    checkpoint[CHECKPOINT_MODEL_STATE_KEY] = {
+        name: tensor.to(torch.bfloat16) if tensor.is_floating_point() else tensor
+        for name, tensor in checkpoint[CHECKPOINT_MODEL_STATE_KEY].items()
+    }
+    checkpoint[CHECKPOINT_RUNTIME_METADATA_KEY][CHECKPOINT_WEIGHTS_DTYPE_KEY] = "bf16"
+
+    model, _ = load_model_from_checkpoint(checkpoint)
+
+    for name, parameter in model.state_dict().items():
+        if parameter.is_floating_point():
+            assert parameter.dtype == torch.float32
+            stored = checkpoint[CHECKPOINT_MODEL_STATE_KEY][name]
+            assert torch.equal(parameter, stored.to(torch.float32))
 
 
-def test_an_unknown_top_level_entry_is_refused() -> None:
+def test_a_checkpoint_outside_the_format_is_refused() -> None:
     checkpoint = _checkpoint()
-    checkpoint["notes"] = {}
-    with pytest.raises(ValueError, match=r"unknown \['notes'\]"):
+    checkpoint[CHECKPOINT_RUNTIME_METADATA_KEY][CHECKPOINT_FORMAT_VERSION_KEY] = 2
+    with pytest.raises(ValueError, match="unsupported checkpoint format version 2"):
         load_model_from_checkpoint(checkpoint)
 
 
 def test_another_generation_is_refused() -> None:
     checkpoint = _checkpoint()
-    checkpoint["runtime_metadata"] = {"generation": "another-generation"}
+    checkpoint[CHECKPOINT_RUNTIME_METADATA_KEY][CHECKPOINT_GENERATION_KEY] = (
+        "another-generation"
+    )
     with pytest.raises(ValueError, match="requires generation 'jointfm-1'"):
-        load_model_from_checkpoint(checkpoint)
-
-
-@pytest.mark.parametrize("entry", ["cfg", "model_state"])
-def test_a_non_mapping_cfg_or_state_is_refused(entry: str) -> None:
-    checkpoint = _checkpoint()
-    checkpoint[entry] = 5
-    with pytest.raises(TypeError, match=f"'{entry}' must be a mapping"):
         load_model_from_checkpoint(checkpoint)
 
 

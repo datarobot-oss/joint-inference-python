@@ -1,6 +1,9 @@
 """The HTTP service mounted over a test network, with its runtime configuration."""
 
+import os
 from typing import Any
+
+import pytest
 
 from jointfm_inference.model.checkpoint import JOINTFM_1_GENERATION
 from jointfm_inference.model.inference import JointFMInferenceSession
@@ -11,6 +14,8 @@ from jointfm_inference.model.service import (
     JointFMHTTPService,
 )
 
+from jointfm_inference.model.service.config import ENV_PREFIX
+
 from tests.support.models import checkpoint_mapping
 
 CHECKPOINT_VERSION = "example-1"
@@ -18,6 +23,13 @@ MODEL_VERSION = f"jointfm-inference:0.2.0+ckpt.{CHECKPOINT_VERSION}"
 # Full precision keeps a served number comparable with an in-process oracle.
 SERVICE_PRECISION = "fp32"
 SERVICE_MAX_SAMPLE_COUNT = 64
+
+
+def clear_service_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove every service setting the developer's shell may have exported."""
+    for name in list(os.environ):
+        if name.startswith(ENV_PREFIX):
+            monkeypatch.delenv(name)
 
 
 def make_service_config(**overrides: Any) -> InferenceServiceConfig:

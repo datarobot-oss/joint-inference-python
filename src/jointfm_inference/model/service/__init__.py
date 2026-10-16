@@ -9,7 +9,6 @@
 from .config import InferenceServiceConfig
 from .constants import (
     DEFAULT_BIND_HOST,
-    DEFAULT_CHECKPOINT_MOUNT_PATH,
     DEFAULT_DEVICE,
     DEFAULT_MAX_CONCURRENT_REQUESTS,
     DEFAULT_MAX_SAMPLE_COUNT,
@@ -27,7 +26,6 @@ from .server import create_service_from_env, main, serve
 
 __all__ = [
     "DEFAULT_BIND_HOST",
-    "DEFAULT_CHECKPOINT_MOUNT_PATH",
     "DEFAULT_DEVICE",
     "DEFAULT_MAX_CONCURRENT_REQUESTS",
     "DEFAULT_MAX_SAMPLE_COUNT",

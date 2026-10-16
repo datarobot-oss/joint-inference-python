@@ -439,15 +439,15 @@ def _parse_header_values(values: Sequence[str]) -> dict[str, str]:
     return headers
 
 
-def _build_argument_parser() -> argparse.ArgumentParser:
-    """Return the CLI argument parser."""
+PROBE_DESCRIPTION = (
+    "Probe one or more JointFM inference service instances by checking "
+    "health and exercising supported return modes."
+)
 
-    parser = argparse.ArgumentParser(
-        description=(
-            "Probe one or more JointFM inference service instances by checking "
-            "health and exercising supported return modes."
-        )
-    )
+
+def add_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add the probe command's options to ``parser``."""
+
     parser.add_argument(
         "--service-url",
         action="append",
@@ -478,14 +478,15 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the successful probe summaries as JSON",
     )
-    return parser
 
 
-def main(argv: Sequence[str] | None = None) -> None:
-    """Run the probe CLI."""
+def run(arguments: argparse.Namespace) -> None:
+    """Probe every service the parsed ``arguments`` name.
 
-    parser = _build_argument_parser()
-    arguments = parser.parse_args(argv)
+    Raises:
+        SystemExit: With status 1 when any service failed its probe.
+    """
+
     headers = _parse_header_values(arguments.header)
 
     summaries: list[ServiceProbeSummary] = []

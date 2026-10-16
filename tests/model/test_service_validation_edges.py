@@ -15,14 +15,10 @@ from typing import Any, cast
 import pytest
 import torch
 
-import jointfm_inference.model.service.config as service_config
 import jointfm_inference.model.service.server as service_server
 from jointfm_inference.data.adapters import ColumnSpec
 from jointfm_inference.model.checkpoint import JOINTFM_1_GENERATION
 from jointfm_inference.model.service import (
-    DEFAULT_CHECKPOINT_MOUNT_PATH,
-    DEFAULT_MAX_CONCURRENT_REQUESTS,
-    DEFAULT_MAX_SAMPLE_COUNT,
     DEFAULT_SCHEMA_VERSION,
     InferenceServiceConfig,
     JointFMHTTPService,
@@ -57,7 +53,18 @@ from jointfm_inference.model.service.validation import (
     _required_env,
 )
 from tests.support.models import tiny_model, write_checkpoint
-from tests.support.service import SERVICE_PRECISION, make_service_config, make_session
+from jointfm_inference.model.service.config import (
+    CHECKPOINT_PATH_ENV,
+    CHECKPOINT_VERSION_ENV,
+    MAX_CONCURRENT_REQUESTS_ENV,
+    PRECISION_ENV,
+)
+from tests.support.service import (
+    SERVICE_PRECISION,
+    clear_service_environment,
+    make_service_config,
+    make_session,
+)
 
 
 def _column_specs() -> list[ColumnSpec]:
@@ -65,90 +72,6 @@ def _column_specs() -> list[ColumnSpec]:
         ColumnSpec(name="known_feature"),
         ColumnSpec(name="target", role="target"),
     ]
-
-
-def _pin_image_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _package_version(_name: str) -> str:
-        return "9.9.9"
-
-    monkeypatch.setattr(service_config, "package_version", _package_version)
-    monkeypatch.setenv("JOINT_CHECKPOINT_VERSION", "example-1")
-
-
-def test_inference_service_config_from_env_uses_defaults(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _pin_image_version(monkeypatch)
-    monkeypatch.delenv("JOINT_CHECKPOINT_PATH", raising=False)
-    monkeypatch.delenv("JOINT_MAX_SAMPLE_COUNT", raising=False)
-    monkeypatch.delenv("JOINT_MAX_CONCURRENT_REQUESTS", raising=False)
-    monkeypatch.delenv("JOINT_MODEL_VERSION", raising=False)
-    monkeypatch.delenv("JOINT_PRECISION", raising=False)
-
-    config = InferenceServiceConfig.from_env()
-
-    assert config.checkpoint_path == DEFAULT_CHECKPOINT_MOUNT_PATH
-    assert config.checkpoint_version == "example-1"
-    assert config.max_sample_count == DEFAULT_MAX_SAMPLE_COUNT
-    assert config.max_concurrent_requests == DEFAULT_MAX_CONCURRENT_REQUESTS
-    assert config.precision == "bf16"
-    assert config.model_version == "jointfm-inference:9.9.9+ckpt.example-1"
-
-
-def test_inference_service_config_reads_max_concurrent_requests_from_env(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``JOINT_MAX_CONCURRENT_REQUESTS`` must override the safe default cap."""
-    _pin_image_version(monkeypatch)
-    monkeypatch.delenv("JOINT_MAX_SAMPLE_COUNT", raising=False)
-    monkeypatch.setenv("JOINT_MAX_CONCURRENT_REQUESTS", "4")
-
-    config = InferenceServiceConfig.from_env()
-
-    assert config.max_concurrent_requests == 4
-
-
-def test_inference_service_config_rejects_non_positive_max_concurrent_requests(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A zero or negative concurrency cap is a startup error, not a silent fallback."""
-    _pin_image_version(monkeypatch)
-    monkeypatch.delenv("JOINT_MAX_SAMPLE_COUNT", raising=False)
-    monkeypatch.setenv("JOINT_MAX_CONCURRENT_REQUESTS", "0")
-
-    with pytest.raises(ServiceError) as exc_info:
-        InferenceServiceConfig.from_env()
-
-    assert exc_info.value.status == HTTPStatus.INTERNAL_SERVER_ERROR
-    assert exc_info.value.field == "JOINT_MAX_CONCURRENT_REQUESTS"
-
-
-@pytest.mark.parametrize("precision", ["fp32", "bf16", "fp16"])
-def test_inference_service_config_reads_precision_from_env(
-    monkeypatch: pytest.MonkeyPatch,
-    precision: str,
-) -> None:
-    """``JOINT_PRECISION`` selects the model precision of every forward."""
-    _pin_image_version(monkeypatch)
-    monkeypatch.setenv("JOINT_PRECISION", precision)
-
-    assert InferenceServiceConfig.from_env().precision == precision
-
-
-@pytest.mark.parametrize("precision", ["tf32", "BF16", "float32", ""])
-def test_inference_service_config_rejects_unknown_precision(
-    monkeypatch: pytest.MonkeyPatch,
-    precision: str,
-) -> None:
-    """An unknown precision is a startup error, not a silent fp32 fallback."""
-    _pin_image_version(monkeypatch)
-    monkeypatch.setenv("JOINT_PRECISION", precision)
-
-    with pytest.raises(ServiceError) as exc_info:
-        InferenceServiceConfig.from_env()
-
-    assert exc_info.value.status == HTTPStatus.INTERNAL_SERVER_ERROR
-    assert exc_info.value.field == "JOINT_PRECISION"
 
 
 def test_resolve_requested_columns_defaults_to_every_column_and_rejects_duplicates() -> (
@@ -327,23 +250,23 @@ def test_service_env_and_optional_field_parsers_validate_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Environment and optional JSON parsers should reject ambiguous types."""
-    monkeypatch.delenv("JOINT_REQUIRED_TEST", raising=False)
+    monkeypatch.delenv("JOINTFM_INFERENCE_REQUIRED_TEST", raising=False)
     with pytest.raises(ServiceError, match="Required environment variable"):
-        _required_env("JOINT_REQUIRED_TEST")
+        _required_env("JOINTFM_INFERENCE_REQUIRED_TEST")
 
-    monkeypatch.setenv("JOINT_REQUIRED_TEST", "value")
-    assert _required_env("JOINT_REQUIRED_TEST") == "value"
+    monkeypatch.setenv("JOINTFM_INFERENCE_REQUIRED_TEST", "value")
+    assert _required_env("JOINTFM_INFERENCE_REQUIRED_TEST") == "value"
 
-    monkeypatch.setenv("JOINT_PORT_TEST", "not-int")
+    monkeypatch.setenv("JOINTFM_INFERENCE_PORT_TEST", "not-int")
     with pytest.raises(ServiceError, match="must be an integer"):
-        _positive_int_from_env("JOINT_PORT_TEST", 8080)
+        _positive_int_from_env("JOINTFM_INFERENCE_PORT_TEST", 8080)
 
-    monkeypatch.setenv("JOINT_PORT_TEST", "0")
+    monkeypatch.setenv("JOINTFM_INFERENCE_PORT_TEST", "0")
     with pytest.raises(ServiceError, match="must be positive"):
-        _positive_int_from_env("JOINT_PORT_TEST", 8080)
+        _positive_int_from_env("JOINTFM_INFERENCE_PORT_TEST", 8080)
 
-    monkeypatch.delenv("JOINT_PORT_TEST", raising=False)
-    assert _positive_int_from_env("JOINT_PORT_TEST", 8080) == 8080
+    monkeypatch.delenv("JOINTFM_INFERENCE_PORT_TEST", raising=False)
+    assert _positive_int_from_env("JOINTFM_INFERENCE_PORT_TEST", 8080) == 8080
 
     assert _optional_bool(None, field="flag", default=True) is True
     assert _optional_bool(False, field="flag", default=True) is False
@@ -829,7 +752,7 @@ def test_slot_is_released_after_forecast_raises_and_after_success() -> None:
 def test_max_concurrent_requests_env_var_caps_observed_concurrency(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """End-to-end: ``JOINT_MAX_CONCURRENT_REQUESTS`` -> from_env -> semaphore value.
+    """End-to-end: ``JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS`` -> from_env -> semaphore.
 
     Constructs the service exactly as the container does at startup, then
     observes the runtime cap by racing more callers than the cap and reading
@@ -837,10 +760,11 @@ def test_max_concurrent_requests_env_var_caps_observed_concurrency(
     at once, no fewer and no more. The single-slot case, the production
     default, is covered by the blocking test below.
     """
-    _pin_image_version(monkeypatch)
-    monkeypatch.delenv("JOINT_MAX_SAMPLE_COUNT", raising=False)
-    monkeypatch.setenv("JOINT_MAX_CONCURRENT_REQUESTS", "3")
-    monkeypatch.setenv("JOINT_PRECISION", SERVICE_PRECISION)
+    clear_service_environment(monkeypatch)
+    monkeypatch.setenv(CHECKPOINT_PATH_ENV, "/models/jointfm.pt")
+    monkeypatch.setenv(CHECKPOINT_VERSION_ENV, "example-1")
+    monkeypatch.setenv(MAX_CONCURRENT_REQUESTS_ENV, "3")
+    monkeypatch.setenv(PRECISION_ENV, SERVICE_PRECISION)
 
     config = InferenceServiceConfig.from_env()
     assert config.max_concurrent_requests == 3

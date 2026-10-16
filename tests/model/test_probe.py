@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
+from jointfm_inference import cli
 from jointfm_inference.model import probe
 from tests.support.condition_mode import random_weight_service
 
@@ -188,7 +189,7 @@ def test_main_prints_cli_summary(
 
     monkeypatch.setattr(probe, "probe_service", lambda *args, **kwargs: summary)
 
-    probe.main(["--service-url", "http://127.0.0.1:8080"])
+    cli.main(["probe", "--service-url", "http://127.0.0.1:8080"])
 
     captured = capsys.readouterr()
     assert captured.err == ""
@@ -390,7 +391,7 @@ def test_main_reports_probe_failures_and_exits_nonzero(
 
     monkeypatch.setattr(probe, "probe_service", failing_probe_service)
     with pytest.raises(SystemExit) as exc_info:
-        probe.main(["--service-url", "http://127.0.0.1:8080/"])
+        cli.main(["probe", "--service-url", "http://127.0.0.1:8080/"])
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert "http://127.0.0.1:8080: health check failed" in captured.err
@@ -422,8 +423,9 @@ def test_main_json_output_includes_summaries_and_failures(
 
     monkeypatch.setattr(probe, "probe_service", probe_one)
     with pytest.raises(SystemExit):
-        probe.main(
+        cli.main(
             [
+                "probe",
                 "--service-url",
                 "http://good:8080",
                 "--service-url",

@@ -27,6 +27,14 @@ def _required_env(name: str) -> str:
     return value
 
 
+def _optional_env(name: str) -> str | None:
+    """Return one optional environment variable, or ``None`` when unset or empty."""
+    value = os.getenv(name)
+    if value is None or value == "":
+        return None
+    return value
+
+
 def _positive_int_from_env(name: str, default: int) -> int:
     """Parse one positive integer environment variable with a default fallback."""
     raw_value = os.getenv(name, str(default))

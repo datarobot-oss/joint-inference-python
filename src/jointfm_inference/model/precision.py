@@ -4,7 +4,7 @@ A model precision names the dtype a model forward runs its matmuls and
 attention in through ``torch.autocast`` (automatic mixed precision: eligible
 operations run in the reduced dtype while numerically sensitive ones stay in
 float32). The parameters themselves stay float32 either way. The session's
-``precision`` argument selects it (``JOINT_PRECISION`` in the HTTP service).
+``precision`` argument selects it (``JOINTFM_INFERENCE_PRECISION`` in the HTTP service).
 """
 
 from __future__ import annotations

@@ -18,7 +18,7 @@ import torch
 from jointfm_inference.model.precision import resolve_autocast_dtype
 
 from .backend_registry import resolve_serving_backend
-from .capacity_envelope import CapacityEnvelope, _resolve_capacity_envelope
+from .capacity_envelope import CapacityEnvelope, capacity_envelope_from_checkpoint
 from .checkpoint import load_inference_components
 from .contract import (
     CanonicalInferenceRequest,
@@ -77,7 +77,7 @@ class JointFMInferenceSession:
         )
         model.eval()
         self._precision = precision
-        self._capacity_envelope = _resolve_capacity_envelope(checkpoint)
+        self._capacity_envelope = capacity_envelope_from_checkpoint(checkpoint)
 
     @classmethod
     def from_checkpoint(
@@ -131,8 +131,8 @@ class JointFMInferenceSession:
         return self._backend.decoding_strategy
 
     @property
-    def capacity_envelope(self) -> Optional[CapacityEnvelope]:
-        """Return the capacity envelope the checkpoint records, if any."""
+    def capacity_envelope(self) -> CapacityEnvelope:
+        """Return the capacity envelope the checkpoint records."""
         return self._capacity_envelope
 
     def execute(

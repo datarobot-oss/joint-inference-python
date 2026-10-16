@@ -134,7 +134,6 @@ class JointFMHTTPService:
         lists the expert-hint traits a column descriptor may carry.
         """
         time_index_support = self._session.time_index_support
-        capacity_envelope = self._session.capacity_envelope
 
         return {
             "status": "ok",
@@ -156,11 +155,7 @@ class JointFMHTTPService:
             "time_index_encoding": time_index_support.encoding,
             "max_sample_count": self._config.max_sample_count,
             "max_concurrent_requests": self._config.max_concurrent_requests,
-            "data_generation": (
-                capacity_envelope.to_payload()
-                if capacity_envelope is not None
-                else None
-            ),
+            "data_generation": self._session.capacity_envelope.to_payload(),
         }
 
     def predict(self, request_payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -9,7 +9,10 @@ import pytest
 import torch
 
 import jointfm_inference.model.inference.backend_registry as backend_registry
+import jointfm_inference.model.inference.checkpoint as checkpoint_loading
 from jointfm_inference.model.checkpoint import (
+    CHECKPOINT_FORMAT_VERSION,
+    CHECKPOINT_FORMAT_VERSION_KEY,
     CHECKPOINT_GENERATION_KEY,
     CHECKPOINT_RUNTIME_METADATA_KEY,
     JOINTFM_1_GENERATION,
@@ -109,9 +112,9 @@ def test_an_unregistered_generation_fails_at_load_before_any_network_is_built(
 ) -> None:
     """A checkpoint whose generation no backend serves stops before any network exists."""
     checkpoint = checkpoint_mapping(tiny_model())
-    checkpoint[CHECKPOINT_RUNTIME_METADATA_KEY] = {
-        CHECKPOINT_GENERATION_KEY: _OTHER_GENERATION
-    }
+    checkpoint[CHECKPOINT_RUNTIME_METADATA_KEY][CHECKPOINT_GENERATION_KEY] = (
+        _OTHER_GENERATION
+    )
     path = tmp_path / "other.pt"
     torch.save(checkpoint, path)
     monkeypatch.setattr(JointFM, "__init__", _refuse_network_construction)
@@ -120,6 +123,28 @@ def test_an_unregistered_generation_fails_at_load_before_any_network_is_built(
         load_inference_components(str(path))
     with pytest.raises(UnregisteredGenerationError, match="'another-generation'"):
         JointFMInferenceSession.from_checkpoint(path)
+
+
+def _refuse_backend_resolution(generation: str) -> None:
+    raise AssertionError(f"no backend may be resolved, got {generation!r}")
+
+
+def test_an_unknown_format_version_fails_at_load_before_any_backend_is_resolved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The format is the runner's, so no backend reads a file of another version."""
+    checkpoint = checkpoint_mapping(tiny_model())
+    checkpoint[CHECKPOINT_RUNTIME_METADATA_KEY][CHECKPOINT_FORMAT_VERSION_KEY] = (
+        CHECKPOINT_FORMAT_VERSION + 1
+    )
+    path = tmp_path / "later.pt"
+    torch.save(checkpoint, path)
+    monkeypatch.setattr(
+        checkpoint_loading, "resolve_serving_backend", _refuse_backend_resolution
+    )
+
+    with pytest.raises(ValueError, match="unsupported checkpoint format version"):
+        load_inference_components(str(path))
 
 
 def test_a_session_refuses_an_unregistered_generation() -> None:

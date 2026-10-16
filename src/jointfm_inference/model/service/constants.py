@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 DEFAULT_SCHEMA_VERSION = "v6"
-DEFAULT_CHECKPOINT_MOUNT_PATH = "/models/jointfm.pt"
 DEFAULT_BIND_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
 DEFAULT_DEVICE = "cpu"
@@ -13,7 +12,7 @@ DEFAULT_MAX_SAMPLE_COUNT = 1000
 # memory (most notably the per-draw Cholesky expansion of the Student-t head's
 # ``sample`` path) cannot stack across threads and OOM the device.
 # The default of one matches the safe budget on a single small GPU; deployments
-# on larger devices should raise it via ``JOINT_MAX_CONCURRENT_REQUESTS`` to
+# on larger devices should raise it via ``JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS`` to
 # the number of largest requests whose peak memory fits the device at once.
 DEFAULT_MAX_CONCURRENT_REQUESTS = 1
 QUERY_MODE_FORECAST = "forecast"

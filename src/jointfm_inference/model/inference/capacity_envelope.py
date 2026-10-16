@@ -9,8 +9,8 @@ its requests.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
-from typing import Any, Optional
+from dataclasses import asdict, dataclass, fields
+from typing import Any
 
 from jointfm_inference.model.checkpoint import (
     CHECKPOINT_CAPACITY_ENVELOPE_KEY,
@@ -24,8 +24,8 @@ class CapacityEnvelope:
 
     ``min_series`` and ``max_series`` bound the total column count,
     ``n_input`` and ``n_output`` are the longest history and horizon in steps,
-    and ``t_input`` and ``t_output`` their time spans. Keys of the checkpoint
-    block outside these six are not read.
+    and ``t_input`` and ``t_output`` their time spans. The checkpoint block
+    holds exactly these six fields.
     """
 
     min_series: int
@@ -63,7 +63,15 @@ def _require_positive_float(payload: Mapping[str, Any], field: str) -> float:
 def _capacity_envelope_from_payload(
     raw_payload: Mapping[str, Any],
 ) -> CapacityEnvelope:
-    """Parse one checkpoint capacity-envelope block."""
+    """Parse one checkpoint capacity-envelope block holding exactly its fields."""
+    names = {field.name for field in fields(CapacityEnvelope)}
+    missing = sorted(names - set(raw_payload))
+    unknown = sorted(set(raw_payload) - names)
+    if missing or unknown:
+        raise ValueError(
+            f"checkpoint {CHECKPOINT_CAPACITY_ENVELOPE_KEY!r} block must hold "
+            f"exactly the capacity envelope: missing {missing}, unknown {unknown}"
+        )
     return CapacityEnvelope(
         min_series=_require_int(raw_payload, "min_series"),
         max_series=_require_int(raw_payload, "max_series"),
@@ -74,24 +82,31 @@ def _capacity_envelope_from_payload(
     )
 
 
-def _resolve_capacity_envelope(
-    checkpoint: Optional[Mapping[str, Any]],
-) -> Optional[CapacityEnvelope]:
-    """Return the capacity envelope a checkpoint records, or ``None`` without one.
+def capacity_envelope_from_checkpoint(
+    checkpoint: Mapping[str, Any],
+) -> CapacityEnvelope:
+    """Read the ``inference_metadata.data_generation`` block of a checkpoint.
 
-    Raises when the block is present but malformed.
+    Raises:
+        ValueError: when the block is missing, lacks a field, or carries a
+            key outside the envelope.
+        TypeError: when the block or a field has the wrong type.
     """
-    if checkpoint is None:
-        return None
-    raw_inference_metadata = checkpoint.get(CHECKPOINT_INFERENCE_METADATA_KEY)
-    if not isinstance(raw_inference_metadata, Mapping):
-        return None
-    raw_envelope = raw_inference_metadata.get(CHECKPOINT_CAPACITY_ENVELOPE_KEY)
-    if raw_envelope is None:
-        return None
+    inference_metadata = checkpoint.get(CHECKPOINT_INFERENCE_METADATA_KEY)
+    if not isinstance(inference_metadata, Mapping):
+        raise ValueError(f"checkpoint missing '{CHECKPOINT_INFERENCE_METADATA_KEY}'")
+    if CHECKPOINT_CAPACITY_ENVELOPE_KEY not in inference_metadata:
+        raise ValueError(
+            f"checkpoint '{CHECKPOINT_INFERENCE_METADATA_KEY}' missing "
+            f"'{CHECKPOINT_CAPACITY_ENVELOPE_KEY}'"
+        )
+    raw_envelope = inference_metadata[CHECKPOINT_CAPACITY_ENVELOPE_KEY]
     if not isinstance(raw_envelope, Mapping):
         raise TypeError(
             "checkpoint inference metadata "
             f"{CHECKPOINT_CAPACITY_ENVELOPE_KEY!r} must be a mapping"
         )
     return _capacity_envelope_from_payload(raw_envelope)
+
+
+__all__ = ["CapacityEnvelope", "capacity_envelope_from_checkpoint"]

@@ -7,24 +7,29 @@ level integration without binding a real socket.
 
 from __future__ import annotations
 
+import signal
+import sys
 from http.server import ThreadingHTTPServer
-from pathlib import Path
+from types import FrameType
 
 from jointfm_inference.model.inference import JointFMInferenceSession
 
+from .checkpoint_source import resolve_checkpoint
 from .config import InferenceServiceConfig
 from .http_handler import _handler_class
 from .http_service import JointFMHTTPService
 
+STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
 
 def create_service_from_env() -> JointFMHTTPService:
-    """Load the configured checkpoint and return the ready HTTP service."""
+    """Load the configured checkpoint and return the ready HTTP service.
+
+    The checkpoint is downloaded first when the environment names a download
+    source and the file is not yet at the configured path.
+    """
     config = InferenceServiceConfig.from_env()
-    checkpoint_path = Path(config.checkpoint_path)
-    if not checkpoint_path.is_file():
-        raise FileNotFoundError(
-            f"Checkpoint not found at configured path: {config.checkpoint_path}"
-        )
+    checkpoint_path = resolve_checkpoint(config)
 
     session = JointFMInferenceSession.from_checkpoint(
         checkpoint_path,
@@ -35,17 +40,36 @@ def create_service_from_env() -> JointFMHTTPService:
     return JointFMHTTPService(config=config, session=session)
 
 
+def _stop_serving(signum: int, frame: FrameType | None) -> None:
+    """Leave ``serve_forever`` with a clean exit when the process is told to stop."""
+    del frame
+    print(f"Stopping on {signal.Signals(signum).name}", file=sys.stderr)
+    raise SystemExit(0)
+
+
 def serve(service: JointFMHTTPService) -> None:
-    """Start the threaded HTTP server for the packaged inference runtime."""
+    """Run the threaded HTTP server until SIGINT or SIGTERM stops it.
+
+    Both signals end the process with status 0 after closing the server.
+    SIGTERM needs its own handler because a container's first process
+    ignores signals it does not handle, so ``docker stop`` would otherwise
+    wait for its timeout and kill the process. The previous handlers are
+    restored on return.
+    """
     handler = _handler_class(service)
-    server = ThreadingHTTPServer(
-        (service._config.bind_host, service._config.port),
-        handler,
-    )
+    address = (service._config.bind_host, service._config.port)
+    server = ThreadingHTTPServer(address, handler)
+    previous_handlers = {
+        stop_signal: signal.signal(stop_signal, _stop_serving)
+        for stop_signal in STOP_SIGNALS
+    }
+    print(f"Serving on http://{address[0]}:{address[1]}", file=sys.stderr)
     try:
         server.serve_forever()
     finally:
         server.server_close()
+        for stop_signal, previous_handler in previous_handlers.items():
+            signal.signal(stop_signal, previous_handler)
 
 
 def main() -> None:

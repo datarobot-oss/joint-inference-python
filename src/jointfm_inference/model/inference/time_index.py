@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any, Final, Sequence
 
 from jointfm_inference.model.checkpoint import (
@@ -35,7 +35,8 @@ def time_index_support_from_checkpoint(
     """Read the ``inference_metadata.time_index_support`` block of a checkpoint.
 
     Raises:
-        ValueError: when the block is missing or names another encoding.
+        ValueError: when the block is missing, lacks a field, carries a key
+            outside :class:`TimeIndexSupport`, or names another encoding.
         TypeError: when a field has the wrong type.
     """
     inference_metadata = checkpoint.get(CHECKPOINT_INFERENCE_METADATA_KEY)
@@ -47,7 +48,15 @@ def time_index_support_from_checkpoint(
             f"checkpoint '{CHECKPOINT_INFERENCE_METADATA_KEY}' missing "
             f"'{CHECKPOINT_TIME_INDEX_SUPPORT_KEY}'"
         )
-    encoding = raw.get("encoding")
+    names = {field.name for field in fields(TimeIndexSupport)}
+    missing = sorted(names - set(raw))
+    unknown = sorted(set(raw) - names)
+    if missing or unknown:
+        raise ValueError(
+            f"checkpoint '{CHECKPOINT_TIME_INDEX_SUPPORT_KEY}' block must hold "
+            f"exactly the time-index support: missing {missing}, unknown {unknown}"
+        )
+    encoding = raw["encoding"]
     if encoding != DISCRETE_GRID_TIME_INDEX_ENCODING:
         raise ValueError(
             f"unsupported time-index encoding: expected "

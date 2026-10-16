@@ -1,0 +1,8 @@
+# The build copies only the sources the Dockerfile names; this keeps
+# configuration, weights, and local environments out of the build context.
+*
+!README.md
+!pyproject.toml
+!uv.lock
+!src/
+**/__pycache__

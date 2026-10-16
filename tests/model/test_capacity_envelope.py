@@ -13,7 +13,7 @@ from jointfm_inference.model.checkpoint import (
 from jointfm_inference.model.inference import CapacityEnvelope
 from jointfm_inference.model.inference.capacity_envelope import (
     _capacity_envelope_from_payload,
-    _resolve_capacity_envelope,
+    capacity_envelope_from_checkpoint,
 )
 
 
@@ -74,39 +74,44 @@ def test_a_missing_field_is_refused() -> None:
     payload = _payload()
     del payload["n_output"]
 
-    with pytest.raises(TypeError, match="'n_output'"):
+    with pytest.raises(ValueError, match=r"missing \['n_output'\]"):
         _capacity_envelope_from_payload(payload)
 
 
-def test_keys_outside_the_envelope_are_not_read() -> None:
-    envelope = _capacity_envelope_from_payload({**_payload(), "notes": "ignored"})
+def test_a_key_outside_the_envelope_is_refused() -> None:
+    """A key the block carries beyond the envelope is refused, never passed on."""
+    with pytest.raises(ValueError, match=r"unknown \['notes'\]"):
+        _capacity_envelope_from_payload({**_payload(), "notes": "unreported"})
+
+
+@pytest.mark.parametrize(
+    "checkpoint",
+    [{}, {CHECKPOINT_INFERENCE_METADATA_KEY: "not-a-mapping"}],
+)
+def test_a_checkpoint_without_inference_metadata_is_refused(
+    checkpoint: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError, match="missing 'inference_metadata'"):
+        capacity_envelope_from_checkpoint(checkpoint)
+
+
+def test_a_checkpoint_without_an_envelope_block_is_refused() -> None:
+    with pytest.raises(ValueError, match="missing 'data_generation'"):
+        capacity_envelope_from_checkpoint({CHECKPOINT_INFERENCE_METADATA_KEY: {}})
+
+
+def test_the_checkpoint_block_is_parsed() -> None:
+    envelope = capacity_envelope_from_checkpoint(_checkpoint(_payload()))
 
     assert envelope.to_payload() == _payload()
 
 
-def test_resolve_returns_none_without_an_envelope_block() -> None:
-    assert _resolve_capacity_envelope(None) is None
-    assert _resolve_capacity_envelope({}) is None
-    assert _resolve_capacity_envelope({CHECKPOINT_INFERENCE_METADATA_KEY: {}}) is None
-    assert (
-        _resolve_capacity_envelope({CHECKPOINT_INFERENCE_METADATA_KEY: "not-a-mapping"})
-        is None
-    )
-    assert _resolve_capacity_envelope(_checkpoint(None)) is None
-
-
-def test_resolve_parses_the_checkpoint_block() -> None:
-    envelope = _resolve_capacity_envelope(_checkpoint(_payload()))
-
-    assert envelope is not None
-    assert envelope.to_payload() == _payload()
-
-
-def test_resolve_rejects_a_non_mapping_block() -> None:
+@pytest.mark.parametrize("block", [None, ["nope"]])
+def test_a_non_mapping_block_is_refused(block: Any) -> None:
     with pytest.raises(TypeError, match="must be a mapping"):
-        _resolve_capacity_envelope(_checkpoint(["nope"]))
+        capacity_envelope_from_checkpoint(_checkpoint(block))
 
 
-def test_resolve_rejects_a_malformed_block() -> None:
+def test_a_malformed_block_is_refused() -> None:
     with pytest.raises(ValueError, match="'max_series' must be non-negative"):
-        _resolve_capacity_envelope(_checkpoint({**_payload(), "max_series": -2}))
+        capacity_envelope_from_checkpoint(_checkpoint({**_payload(), "max_series": -2}))

@@ -160,6 +160,86 @@ tasks:
       fi
       echo "OK: pre-commit hooks passed"
 
+  serve:
+    desc: Serve the checkpoint that .env configures, downloading it first when .env names a URL (stop with Ctrl-C)
+    dotenv: [.env]
+    preconditions:
+      - sh: test -f .env
+        msg: "FAIL: .env is missing; copy .env.sample to .env and fill it in"
+    cmd: |
+      STATUS=0
+      uv run jointfm-inference serve || STATUS=$?
+      # uv reports 130 or 143 when Ctrl-C or SIGTERM stopped it, even though
+      # the service itself shut down cleanly.
+      case "$STATUS" in
+        0|130|143) echo "OK: service stopped" ;;
+        *) echo "FAIL: service exited with status $STATUS"; exit 1 ;;
+      esac
+
+  probe:
+    desc: "Probe the service that .env configures on this host, or the services named after -- (task probe -- --service-url http://host:8080)"
+    dotenv: [.env]
+    cmd: |
+      if [ -n "{{.CLI_ARGS}}" ]; then
+        set -- {{.CLI_ARGS}}
+      else
+        set -- --service-url "http://127.0.0.1:${JOINTFM_INFERENCE_PORT:-8080}"
+      fi
+      if uv run jointfm-inference probe "$@"; then
+        echo "OK: every probed service answered every advertised return mode"
+      else
+        echo "FAIL: at least one probed service failed"
+        exit 1
+      fi
+
+  docker:build:
+    desc: Build the container image jointfm-inference:<project version>; it holds no weights
+    preconditions:
+      - sh: command -v docker >/dev/null 2>&1
+        msg: "FAIL: docker is required for docker:build"
+    cmd: |
+      VERSION="$(uv version --short)"
+      if docker build --file container/Dockerfile --build-arg "IMAGE_VERSION=$VERSION" --tag "jointfm-inference:$VERSION" .; then
+        echo "OK: built image jointfm-inference:$VERSION"
+      else
+        echo "FAIL: docker build failed"
+        exit 1
+      fi
+
+  docker:run:
+    desc: "Run the container image on the checkpoint that .env configures, mounting its directory at /models; extra docker run options go after -- (task docker:run -- --gpus all)"
+    dotenv: [.env]
+    preconditions:
+      - sh: command -v docker >/dev/null 2>&1
+        msg: "FAIL: docker is required for docker:run"
+      - sh: test -f .env
+        msg: "FAIL: .env is missing; copy .env.sample to .env and fill it in"
+      - sh: test -n "${JOINTFM_INFERENCE_CHECKPOINT_PATH:-}"
+        msg: "FAIL: set JOINTFM_INFERENCE_CHECKPOINT_PATH in .env"
+    cmd: |
+      VERSION="$(uv version --short)"
+      CHECKPOINT_DIR="$(dirname "$JOINTFM_INFERENCE_CHECKPOINT_PATH")"
+      mkdir -p "$CHECKPOINT_DIR"
+      CHECKPOINT_DIR="$(cd "$CHECKPOINT_DIR" && pwd)"
+      CHECKPOINT_FILE="$(basename "$JOINTFM_INFERENCE_CHECKPOINT_PATH")"
+      # The container always listens on 8080 at every address; .env's bind
+      # host and port choose where the host publishes it.
+      if docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        --env-file .env \
+        --env "JOINTFM_INFERENCE_CHECKPOINT_PATH=/models/$CHECKPOINT_FILE" \
+        --env JOINTFM_INFERENCE_BIND_HOST=0.0.0.0 \
+        --env JOINTFM_INFERENCE_PORT=8080 \
+        --publish "${JOINTFM_INFERENCE_BIND_HOST:-0.0.0.0}:${JOINTFM_INFERENCE_PORT:-8080}:8080" \
+        --volume "$CHECKPOINT_DIR:/models" \
+        {{.CLI_ARGS}} \
+        "jointfm-inference:$VERSION"; then
+        echo "OK: container stopped"
+      else
+        echo "FAIL: container exited with an error"
+        exit 1
+      fi
+
   install:ripgrep:
     desc: Install ripgrep using the available system package manager
     cmd: |

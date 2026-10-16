@@ -37,6 +37,9 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/datarobot/joint-inference-python"
 
+[project.scripts]
+jointfm-inference = "jointfm_inference.cli:main"
+
 # The inference backend registry: one serving backend per checkpoint generation marker.
 [project.entry-points."jointfm_inference.backends"]
 jointfm-1 = "jointfm_inference.model.inference.jointfm_1_backend:JOINTFM_1_SERVING_BACKEND"

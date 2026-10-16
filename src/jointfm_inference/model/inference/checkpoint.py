@@ -7,8 +7,8 @@ from typing import Any, Optional, Union
 import torch
 
 from jointfm_inference.model.checkpoint import (
-    checkpoint_generation,
     read_checkpoint_file,
+    require_checkpoint_format,
 )
 
 from .backend_registry import resolve_serving_backend
@@ -25,11 +25,13 @@ def load_inference_components(
     Returns ``(generation, model, model_cfg, checkpoint)``.
 
     Raises:
+        ValueError, TypeError: when the file does not follow the runner's
+            checkpoint format, before any backend is resolved.
         UnregisteredGenerationError: when no serving backend is registered
             for the checkpoint's generation, before any model is built.
     """
     checkpoint = read_checkpoint_file(checkpoint_path, map_location=map_location)
-    generation = checkpoint_generation(checkpoint)
+    generation = require_checkpoint_format(checkpoint)
     model, model_cfg = resolve_serving_backend(generation).load(
         checkpoint, device=torch.device(device) if device is not None else None
     )
