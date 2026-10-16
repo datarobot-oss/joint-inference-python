@@ -2,7 +2,21 @@
 
 `jointfm-inference` is the inference runner for JointFM: it will load released JointFM checkpoints and serve joint probabilistic forecasts over HTTP. Applications talk to a running instance through the [`jointfm-client`](https://github.com/datarobot/joint-client-python) SDK ([PyPI](https://pypi.org/project/jointfm-client/)).
 
-The repository currently holds the project tooling only; the serving code is not here yet.
+The repository holds the serving code for JointFM 1 checkpoints. Command-line entry points and a container image are not here yet.
+
+## Layout
+
+| Package | Contents |
+|---|---|
+| `jointfm_inference.model.service` | HTTP service: request validation, conditions, scoring, JSON serialization |
+| `jointfm_inference.model.inference` | Inference session, backend registry, backend-neutral contract, conditioning, the JointFM 1 serving backend |
+| `jointfm_inference.model.jointfm_1` | The JointFM 1 network, its Student-t mixture head, and its checkpoint loader |
+| `jointfm_inference.model` | Checkpoint reading, linear algebra, precision, and the command-line probe |
+| `jointfm_inference.data` | Canonical samples, request times, DataFrame conversion |
+
+## Checkpoints
+
+A checkpoint is a plain-data mapping saved with `torch.save` and loaded with `weights_only=True`. It names the generation that wrote it in `runtime_metadata.generation`; the session resolves that marker to a serving backend through the `jointfm_inference.backends` entry-point group and fails at load when no installed distribution registers it. This distribution registers `jointfm-1`. A JointFM 1 checkpoint holds exactly `cfg` (the network sizes), `model_state`, `runtime_metadata`, and `inference_metadata` (the time-index support and the capacity envelope that `/healthz` reports); any other entry is refused.
 
 ## Development
 

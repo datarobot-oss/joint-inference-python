@@ -83,9 +83,12 @@ PUBLIC_RULES = (
             r"|\b[a-z0-9.-]+\.amazonaws\.com\b"
         ),
     ),
+    # Four-part package versions (CUDA libraries use them) have an address's shape; a lock
+    # file states them only as a version value or inside a distribution file name.
     Rule(
         "private-ip-address",
         re.compile(
+            r'(?<!version = ")(?<!\w-)'
             r"\b(?:10(?:\.\d{1,3}){3}"
             r"|192\.168(?:\.\d{1,3}){2}"
             r"|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b"

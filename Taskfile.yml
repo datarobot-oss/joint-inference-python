@@ -7,6 +7,9 @@ vars:
   PYTHON_VERSION: '{{.PYTHON_VERSION | default "3.13.3"}}'
   TYPOS_VERSION: '{{.TYPOS_VERSION | default "1.45.1"}}'
   COVERAGE_FAIL_UNDER: '{{.COVERAGE_FAIL_UNDER | default "90"}}'
+  # Starting an xdist worker imports torch, so beyond a few workers
+  # startup outweighs the parallel test time.
+  TEST_MAX_WORKERS: '{{.TEST_MAX_WORKERS | default "8"}}'
 
 tasks:
   default:
@@ -102,7 +105,7 @@ tasks:
   test:
     desc: Run the unit test suite
     cmd: |
-      if uv run pytest -n auto {{.CLI_ARGS}}; then
+      if uv run pytest -n auto --maxprocesses={{.TEST_MAX_WORKERS}} {{.CLI_ARGS}}; then
         echo "OK: tests passed"
       else
         echo "FAIL: tests failed"
@@ -112,7 +115,7 @@ tasks:
   coverage:
     desc: Run the unit test suite with coverage enforcement
     cmd: |
-      if uv run pytest -q -n auto -p no:cacheprovider --cov=jointfm_inference --cov-report=term-missing:skip-covered --cov-fail-under={{.COVERAGE_FAIL_UNDER}}; then
+      if uv run pytest -q -n auto --maxprocesses={{.TEST_MAX_WORKERS}} -p no:cacheprovider --cov=jointfm_inference --cov-report=term-missing:skip-covered --cov-fail-under={{.COVERAGE_FAIL_UNDER}}; then
         echo "OK: tests passed with coverage at or above {{.COVERAGE_FAIL_UNDER}}%"
       else
         echo "FAIL: tests failed or coverage is below {{.COVERAGE_FAIL_UNDER}}%"

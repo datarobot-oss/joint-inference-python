@@ -26,10 +26,20 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    "numpy",
+    "orjson>=3.11",
+    "pandas",
+    "scipy",
+    "torch==2.9.1",
+]
 
 [project.urls]
 Repository = "https://github.com/datarobot/joint-inference-python"
+
+# The inference backend registry: one serving backend per checkpoint generation marker.
+[project.entry-points."jointfm_inference.backends"]
+jointfm-1 = "jointfm_inference.model.inference.jointfm_1_backend:JOINTFM_1_SERVING_BACKEND"
 
 [dependency-groups]
 dev = [
@@ -58,7 +68,9 @@ include = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["scripts"]
+pythonpath = [".", "scripts"]
+# Test files share basenames across directories, so they are imported by path.
+addopts = "--import-mode=importlib"
 
 [tool.ruff.lint]
 preview = true

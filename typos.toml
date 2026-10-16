@@ -23,6 +23,8 @@ ignore-parent = false
 locale = "en-us"
 
 [default.extend-words]
+# Off-diagonal block of a partitioned covariance matrix, as in sigma_ba.
+"ba" = "ba"
 "DataRobot" = "DataRobot"
 "JointFM" = "JointFM"
 "dtype" = "dtype"
@@ -50,6 +52,7 @@ locale = "en-us"
 "serialise" = "serialize"
 
 [default.extend-identifiers]
+"ba" = "ba"
 "DataRobot" = "DataRobot"
 "JointFM" = "JointFM"
 "jointfm" = "jointfm"

@@ -8,14 +8,14 @@ import leak_guard
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Samples are assembled at runtime so this file's own source never matches a rule.
-OBJECT_ID = "6a0" + "23f4f844e91557a9fc1f3"
+OBJECT_ID = "0123456789ab" + "cdef01234567"
 HEADER = "proprietary and " + "confidential to the owner"
 SAMPLES = {
     "proprietary-header": HEADER,
     "datarobot-object-id": f"deployment {OBJECT_ID}",
     "internal-host": "gpu-7.cluster" + ".internal",
     "private-ip-address": "10.2" + ".3.4",
-    "datarobot-host": "shell" + ".datarobot.com",
+    "datarobot-host": "tenant-example" + ".datarobot.com",
     "private-repository-link": "github.com/datarobot/" + "secret-repo",
     "planning-label": "Phase" + " 3g",
     "unreleased-generation": "JointFM" + " 2",
@@ -28,6 +28,8 @@ PUBLIC_TEXTS = (
     "JointFM" + " 1 serves 2 horizons",
     "sha256 " + "ab" * 32,
     "phase shift of the seasonal component",
+    'version = "10.3' + '.9.90"',
+    "nvidia_curand_cu12-10.3" + ".9.90-py3-none-manylinux_2_27_x86_64.whl",
 )
 
 
@@ -70,6 +72,12 @@ def test_each_public_rule_flags_its_sample(rule: str, text: str) -> None:
 @pytest.mark.parametrize("text", PUBLIC_TEXTS)
 def test_public_rules_pass_publishable_text(text: str) -> None:
     assert leak_guard.scan_text("sample", text, leak_guard.PUBLIC_RULES) == []
+
+
+def test_private_ip_address_in_a_url_is_flagged() -> None:
+    text = "http://10.2" + ".3.4:8080/predict"
+    findings = leak_guard.scan_text("sample", text, leak_guard.PUBLIC_RULES)
+    assert _rules_hit(findings) == {"private-ip-address"}
 
 
 def test_this_repository_passes_its_own_guard() -> None:
