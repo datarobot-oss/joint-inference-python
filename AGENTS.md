@@ -27,6 +27,7 @@ Dependencies point one way: this project depends only on public packages and nev
 - **File size.** A Python source file stays at or below 1000 lines; a module that would grow past that becomes a package of submodules grouped by concern.
 - **Comments** explain why, not what. Configuration comments state only what stays true whatever the value is — never the current value or arithmetic on it.
 - **No transient labels** — no phase, milestone, sprint, or ticket identifiers in docstrings, comments, help strings, error messages, or tests. Describe the lasting behavior instead.
+- **License headers.** Every Python file starts with the Apache-2.0 header from `.licenserc.yaml`; the `insert-license` hook adds it, so never write it by hand or vary its text.
 - **Tests** are fast, run on CPU, and create any checkpoint they need instead of assuming one exists locally. When fixing a bug, add the failing test first.
 
 ## Git

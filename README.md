@@ -69,7 +69,7 @@ docker run --rm -p 8080:8080 -v "$PWD/models:/models" \
 
 ## Development
 
-Prerequisites: [uv](https://docs.astral.sh/uv/) and [Task](https://taskfile.dev/). Ubuntu, Amazon Linux, and macOS are supported.
+Prerequisites: [uv](https://docs.astral.sh/uv/), [Task](https://taskfile.dev/), and docker for the license header hook. Ubuntu, Amazon Linux, and macOS are supported.
 
 ```sh
 task setup        # create .venv, install dependencies, pre-commit hooks, ripgrep, and typos
@@ -83,6 +83,8 @@ task pre-commit   # run every check that gates a commit
 | `task test` | Run the unit tests |
 | `task coverage` | Run the unit tests and enforce the coverage floor |
 | `task check` | Read-only static checks: typos, Ruff lint and format check, ty |
+| `task license-check` | Fail when a Python file lacks the license header (needs docker) |
+| `task license-fix` | Add the license header to every Python file that lacks it (needs docker) |
 | `task leak-guard` | Fail when a file in the working tree carries private material in its path or content |
 | `task leak-guard:history` | Fail when any commit reachable from any ref carries private material in its message, paths, or files; pass revisions to narrow the scan (`task leak-guard:history -- origin/main..HEAD`) |
 | `task format` | Apply the Ruff formatter |
@@ -93,7 +95,7 @@ task pre-commit   # run every check that gates a commit
 | `task docker:build` | Build the container image, which holds no weights |
 | `task docker:run` | Run the container image on the checkpoint `.env` configures |
 
-Every task prints an `OK:` or `FAIL:` line. Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/), checked by Commitizen in the `commit-msg` hook. CI runs `task pre-commit` and `task build` on Ubuntu and macOS.
+Every task prints an `OK:` or `FAIL:` line. Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/), checked by Commitizen in the `commit-msg` hook. CI runs `task pre-commit` and `task build` on Ubuntu and macOS; the macOS job skips the license header hook because its runners have no docker.
 
 ### Leak guard
 
@@ -105,4 +107,4 @@ Rules for contributors and coding agents are in [AGENTS.md](AGENTS.md).
 
 ## License
 
-This repository does not carry a license yet.
+Licensed under the [Apache License, Version 2.0](LICENSE). Every Python file carries the license header that [.licenserc.yaml](.licenserc.yaml) defines; the `insert-license` pre-commit hook adds it with [skywalking-eyes](https://github.com/apache/skywalking-eyes), which runs as a docker image.

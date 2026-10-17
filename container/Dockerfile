@@ -10,7 +10,7 @@ WORKDIR /workspace
 ENV UV_LINK_MODE=copy
 ENV UV_PROJECT_ENVIRONMENT=/opt/jointfm-inference/.venv
 
-COPY README.md pyproject.toml uv.lock ./
+COPY LICENSE README.md pyproject.toml uv.lock ./
 COPY src src
 
 RUN uv sync --frozen --no-dev --no-editable

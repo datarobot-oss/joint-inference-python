@@ -6,6 +6,8 @@ silent: true
 vars:
   PYTHON_VERSION: '{{.PYTHON_VERSION | default "3.13.3"}}'
   TYPOS_VERSION: '{{.TYPOS_VERSION | default "1.45.1"}}'
+  # Keep in step with the insert-license hook in .pre-commit-config.yaml.
+  SKYWALKING_EYES_VERSION: '{{.SKYWALKING_EYES_VERSION | default "0.8.0"}}'
   COVERAGE_FAIL_UNDER: '{{.COVERAGE_FAIL_UNDER | default "90"}}'
   # Starting an xdist worker imports torch, so beyond a few workers
   # startup outweighs the parallel test time.
@@ -56,6 +58,32 @@ tasks:
         echo "OK: ruff format check passed"
       else
         echo "FAIL: files need formatting; run task format"
+        exit 1
+      fi
+
+  license-check:
+    desc: Verify every Python file carries the Apache-2.0 license header (read-only; needs docker)
+    preconditions:
+      - sh: command -v docker >/dev/null 2>&1
+        msg: "FAIL: docker is required for license-check"
+    cmd: |
+      if docker run --rm --volume "$PWD:/src" --workdir /src apache/skywalking-eyes:{{.SKYWALKING_EYES_VERSION}} -c .licenserc.yaml header check; then
+        echo "OK: every Python file carries the license header"
+      else
+        echo "FAIL: files lack the license header; run task license-fix"
+        exit 1
+      fi
+
+  license-fix:
+    desc: Add the Apache-2.0 license header to every Python file that lacks it (needs docker)
+    preconditions:
+      - sh: command -v docker >/dev/null 2>&1
+        msg: "FAIL: docker is required for license-fix"
+    cmd: |
+      if docker run --rm --user "$(id -u):$(id -g)" --volume "$PWD:/src" --workdir /src apache/skywalking-eyes:{{.SKYWALKING_EYES_VERSION}} -c .licenserc.yaml header fix; then
+        echo "OK: license headers applied"
+      else
+        echo "FAIL: skywalking-eyes could not apply every license header"
         exit 1
       fi
 

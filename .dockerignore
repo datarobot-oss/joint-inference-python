@@ -1,6 +1,7 @@
 # The build copies only the sources the Dockerfile names; this keeps
 # configuration, weights, and local environments out of the build context.
 *
+!LICENSE
 !README.md
 !pyproject.toml
 !uv.lock

@@ -7,6 +7,13 @@ default_stages: [pre-commit]
 repos:
   - repo: local
     hooks:
+      - id: insert-license
+        name: insert license header
+        entry: apache/skywalking-eyes:0.8.0 -c .licenserc.yaml header fix
+        language: docker_image
+        pass_filenames: false
+        require_serial: true
+        always_run: true
       - id: commitizen
         name: conventional commit message
         entry: uv run cz check --commit-msg-file

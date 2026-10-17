@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Inference runner that serves JointFM checkpoints over HTTP"
 readme = "README.md"
 requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
     { name = "Stefan Hackmann", email = "stefan.hackmann@datarobot.com" },
 ]
@@ -64,6 +66,7 @@ packages = ["src/jointfm_inference"]
 
 [tool.hatch.build.targets.sdist]
 include = [
+    "/LICENSE",
     "/README.md",
     "/pyproject.toml",
     "/src/jointfm_inference",

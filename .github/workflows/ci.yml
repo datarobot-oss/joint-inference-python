@@ -57,7 +57,11 @@ jobs:
             - name: Sync project dependencies
               run: uv sync --locked --all-groups
 
+            # macOS runners ship without docker, which the skywalking-eyes
+            # hook needs; the Ubuntu job checks the license headers.
             - name: Run task pre-commit
+              env:
+                  SKIP: ${{ runner.os == 'macOS' && 'insert-license' || '' }}
               run: task pre-commit
 
             - name: Build distribution
