@@ -49,6 +49,8 @@ AUTO_STANDARDIZATION_METADATA_KEYS = (
 MIN_POSITIVE_PROB = 1e-12
 MIN_CHOLESKY_DIAGONAL = 1e-6
 MAX_DF = 1e4
+# Capping the exponent of the df readout keeps it finite in reduced precision.
+MAX_LOG_DF_EXCESS = math.log(MAX_DF)
 # Added to the degrees-of-freedom floor so it stays strictly above ``min_df``.
 DF_EPS = 1e-4
 # Floor of the chi-square draw, keeping the Student-t scale sqrt(df / w) finite.
@@ -105,7 +107,9 @@ class StudentTHead(nn.Module):
     ``covariance_rank`` factor ``U``. The mixture logits, degrees of freedom,
     pooled means and pooled covariance diagonal are decoded from the pooled
     per-horizon context; each column's factor rows and its mean and diagonal
-    offsets are decoded from that column's own horizon token. Emitted keys:
+    offsets are decoded from that column's own horizon token. A component's
+    degrees of freedom are ``min_df + exp(out_log_df(h))``, so the projection
+    emits the log of their excess over the floor. Emitted keys:
     ``logits`` ``(B, H, K)``, ``means`` ``(B, H, K, D)``, ``df`` ``(B, H, K)``,
     ``lowrank_diag`` ``(B, H, K, D)`` and ``lowrank_U`` ``(B, H, K, D, rank)``,
     with ``D`` the column capacity.
@@ -140,7 +144,7 @@ class StudentTHead(nn.Module):
 
         self.out_logits = nn.Linear(trunk_hidden, K)
         self.out_means = nn.Linear(trunk_hidden, K * D)
-        self.out_df = nn.Linear(trunk_hidden, K)
+        self.out_log_df = nn.Linear(trunk_hidden, K)
         self.out_diag = nn.Linear(trunk_hidden, K * D)
         self.column_location = ColumnLocationReadout(
             column_dim=d_model,
@@ -172,9 +176,12 @@ class StudentTHead(nn.Module):
         )
         logits = self.out_logits(h)
         means = self.out_means(h).reshape(B, H, self.K, self.D) + mean_offset
-        df = F.softplus(self.out_df(h)).reshape(B, H, self.K) + self.min_df + DF_EPS
+        log_df_excess = self.out_log_df(h).reshape(B, H, self.K)
+        df = (
+            torch.exp(log_df_excess.clamp(max=MAX_LOG_DF_EXCESS)) + self.min_df + DF_EPS
+        )
         df = torch.clamp(df, max=MAX_DF)
-        # Autocast may compute the softplus in float32.
+        # Autocast may compute the exponential in float32.
         if df.dtype != logits.dtype:
             df = df.to(dtype=logits.dtype)
         out = {"logits": logits, "means": means, "df": df}
