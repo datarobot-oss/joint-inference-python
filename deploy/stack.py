@@ -17,8 +17,9 @@
 DataRobot builds the image itself from an uploaded build context (code to
 workload), so nothing here needs docker or an image registry. The context is
 the runner's own container build plus one extra stage that bakes the
-checkpoint in, and the Workload exposes the service's ``/healthz`` and
-``/predict`` behind DataRobot authentication.
+checkpoint in. The spec sets no per-route auth: clusters may refuse route
+configuration, and the gateway default already requires DataRobot
+authentication on every route.
 
 Every setting comes from the environment, which the ``deploy:*`` Taskfile
 targets load from the same ``.env`` that ``task serve`` reads.
@@ -62,8 +63,6 @@ RUNNER_SOURCES = ("LICENSE", "README.md", "pyproject.toml", "uv.lock", "src")
 CONTAINER_NAME = "jointfm-inference"
 CONTAINER_PORT = 8080
 HEALTH_ROUTE = "/healthz"
-PREDICT_ROUTE = "/predict"
-ROUTE_AUTH = "required"
 # Loading the checkpoint happens before the port opens, so startup gets a long
 # window while readiness stays quick once the service answers.
 STARTUP_PROBE_PERIOD_SECONDS = 10
@@ -240,12 +239,6 @@ def define_stack() -> None:
                                     source="string", name=key, value=value
                                 )
                                 for key, value in settings.service_env.items()
-                            ],
-                            routes=[
-                                datarobot.ArtifactSpecContainerGroupContainerRouteArgs(
-                                    path=route, auth=ROUTE_AUTH
-                                )
-                                for route in (HEALTH_ROUTE, PREDICT_ROUTE)
                             ],
                             startup_probe=datarobot.ArtifactSpecContainerGroupContainerStartupProbeArgs(
                                 path=HEALTH_ROUTE,
