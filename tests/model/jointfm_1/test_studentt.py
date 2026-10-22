@@ -23,6 +23,7 @@ from scipy.stats import multivariate_t
 from jointfm_inference.model.jointfm_1.head import (
     AUTO_STANDARDIZATION_CENTER_KEY,
     AUTO_STANDARDIZATION_SCALE_KEY,
+    DF_EPS,
     MAX_DF,
     StudentTHead,
 )
@@ -85,6 +86,29 @@ def test_forward_emits_the_documented_shapes_and_floors() -> None:
     assert params["lowrank_U"].shape == (B, H, K, D, RANK)
     assert (params["df"] > 4.5).all()
     assert (params["lowrank_diag"] >= 1e-4).all()
+
+
+def test_degrees_of_freedom_are_the_floor_plus_the_exponential_of_the_readout() -> None:
+    """A near-Gaussian component sits at a raw output near the log of its excess."""
+    min_df = 4.5
+    head = _head(min_df=min_df)
+    excess = torch.tensor([2.0, 98.0])
+    with torch.no_grad():
+        head.out_log_df.weight.zero_()
+        head.out_log_df.bias.copy_(torch.log(excess))
+
+    expected = (min_df + DF_EPS + excess).expand(B, H, K)
+    torch.testing.assert_close(_params(head)["df"], expected)
+
+
+def test_a_state_dict_of_the_softplus_df_readout_fails_strict_loading() -> None:
+    head = _head()
+    state = {
+        key.replace("out_log_df", "out_df"): value
+        for key, value in head.state_dict().items()
+    }
+    with pytest.raises(RuntimeError, match="out_log_df"):
+        _head().load_state_dict(state, strict=True)
 
 
 def test_log_prob_matches_the_closed_form_student_t_mixture() -> None:
@@ -177,8 +201,8 @@ def test_mean_and_quantiles_track_the_mixture_location() -> None:
 def test_degrees_of_freedom_stay_bounded_under_extreme_logits() -> None:
     head = _head()
     with torch.no_grad():
-        head.out_df.weight.fill_(1e4)
-        head.out_df.bias.fill_(1e4)
+        head.out_log_df.weight.fill_(1e4)
+        head.out_log_df.bias.fill_(1e4)
     params = _params(head)
 
     assert torch.isfinite(params["df"]).all()
