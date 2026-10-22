@@ -23,16 +23,16 @@ jobs:
                 os: [ubuntu-latest, macos-latest]
         steps:
             - name: Checkout
-              uses: actions/checkout@v4
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
             - name: Install Task
-              uses: arduino/setup-task@v2
+              uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
               with:
                   version: 3.x
                   repo-token: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Install uv with cache
-              uses: astral-sh/setup-uv@v6
+              uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
               with:
                   version: "0.10.12"
                   python-version: "3.13.3"
@@ -42,7 +42,7 @@ jobs:
                       pyproject.toml
 
             - name: Cache pre-commit environments
-              uses: actions/cache@v4
+              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   path: ~/.cache/pre-commit
                   key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
@@ -50,7 +50,7 @@ jobs:
                       pre-commit-${{ runner.os }}-
 
             - name: Install typos CLI
-              uses: taiki-e/install-action@v2
+              uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
               with:
                   tool: typos-cli@1.45.1
 
@@ -73,18 +73,18 @@ jobs:
         timeout-minutes: 10
         steps:
             - name: Checkout with full history
-              uses: actions/checkout@v4
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   fetch-depth: 0
 
             - name: Install Task
-              uses: arduino/setup-task@v2
+              uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
               with:
                   version: 3.x
                   repo-token: ${{ secrets.GITHUB_TOKEN }}
 
             - name: Install uv with cache
-              uses: astral-sh/setup-uv@v6
+              uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
               with:
                   version: "0.10.12"
                   python-version: "3.13.3"
@@ -95,3 +95,32 @@ jobs:
 
             - name: Scan every reachable commit
               run: task leak-guard:history
+
+    secret-scan-history:
+        name: task secret-scan:history
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout with full history
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+
+            - name: Install Task
+              uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
+              with:
+                  version: 3.x
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Install uv with cache
+              uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+              with:
+                  version: "0.10.12"
+                  python-version: "3.13.3"
+                  enable-cache: true
+                  cache-dependency-glob: |
+                      uv.lock
+                      pyproject.toml
+
+            - name: Scan every reachable commit for secrets
+              run: task secret-scan:history

@@ -1,0 +1,2 @@
+# generic-api-key matches the constant name CHECKPOINT_TIME_INDEX_SUPPORT_KEY, not a secret.
+1a96b20f6835e336da53bc71fdf9aa657986eec5:tests/support/models.py:generic-api-key:98
