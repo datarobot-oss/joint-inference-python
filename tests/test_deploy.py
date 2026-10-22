@@ -86,6 +86,17 @@ def test_settings_read_the_workload_resources(checkpoint: Path) -> None:
     )
 
 
+def test_a_relative_checkpoint_path_is_taken_from_the_repository_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Pulumi runs the program from deploy/, task serve from the root.
+    monkeypatch.chdir(tmp_path)
+
+    settings = stack.read_settings(_env(Path("LICENSE")))
+
+    assert settings.checkpoint_path == stack.REPO_ROOT / "LICENSE"
+
+
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [

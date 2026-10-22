@@ -128,7 +128,8 @@ def read_settings(env: Mapping[str, str]) -> DeploySettings:
 
     The DataRobot credentials are checked here even though the provider reads
     them itself, so a missing one fails before any staging work. The
-    checkpoint must be a file on this machine: the build context carries it.
+    checkpoint must be a file on this machine, since the build context carries
+    it; a relative path is taken from the repository root.
     """
     endpoint = _required(env, DATAROBOT_ENDPOINT_ENV)
     if not endpoint.rstrip("/").endswith(DATAROBOT_API_PATH):
@@ -138,7 +139,9 @@ def read_settings(env: Mapping[str, str]) -> DeploySettings:
         )
     _required(env, DATAROBOT_API_TOKEN_ENV)
 
-    checkpoint_path = Path(_required(env, CHECKPOINT_PATH_ENV)).expanduser()
+    # Pulumi runs this from deploy/, but task serve reads the same .env from
+    # the repository root, so a relative path means the root in both.
+    checkpoint_path = REPO_ROOT / Path(_required(env, CHECKPOINT_PATH_ENV)).expanduser()
     if not checkpoint_path.is_file():
         raise FileNotFoundError(
             f"{CHECKPOINT_PATH_ENV} names no file on this machine: {checkpoint_path}"
