@@ -34,8 +34,7 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 
 1. Fork the repository, or branch directly if you are a maintainer.
 2. Create a feature branch off `main`.
-3. Make focused commits that pass `task pre-commit`. Commit messages follow
-   [Conventional Commits](https://www.conventionalcommits.org/), checked by the `commit-msg` hook.
+3. Make focused commits that pass `task pre-commit`.
 4. Open a pull request against `main` describing what changed, why, and how you verified it.
 
 ## Maintainers

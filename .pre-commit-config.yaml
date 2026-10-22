@@ -14,11 +14,6 @@ repos:
         pass_filenames: false
         require_serial: true
         always_run: true
-      - id: commitizen
-        name: conventional commit message
-        entry: uv run cz check --commit-msg-file
-        language: system
-        stages: [commit-msg]
       - id: leak-guard-message
         name: leak guard (commit message)
         entry: uv run python scripts/leak_guard.py message
