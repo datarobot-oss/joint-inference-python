@@ -65,6 +65,8 @@ deploy = [
 [tool.uv]
 required-version = ">=0.10"
 exclude-newer = "14 days"
+# Windows is unsupported; resolve the lock only for the supported platforms.
+environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jointfm_inference"]
