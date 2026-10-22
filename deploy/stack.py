@@ -17,9 +17,8 @@
 DataRobot builds the image itself from an uploaded build context (code to
 workload), so nothing here needs docker or an image registry. The context is
 the runner's own container build plus one extra stage that bakes the
-checkpoint in. The spec sets no per-route auth: clusters may refuse route
-configuration, and the gateway default already requires DataRobot
-authentication on every route.
+checkpoint in. The spec sets no per-route auth; requests to the Workload
+take a DataRobot API token.
 
 Every setting comes from the environment, which the ``deploy:*`` Taskfile
 targets load from the same ``.env`` that ``task serve`` reads.

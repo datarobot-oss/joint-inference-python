@@ -138,6 +138,16 @@ tasks:
         exit 1
       fi
 
+  secret-scan:history:
+    desc: Fail when any commit reachable from any ref carries a credential, scanned by gitleaks
+    cmd: |
+      if uv run pre-commit run --all-files --hook-stage manual gitleaks-history; then
+        echo "OK: gitleaks found no credentials in the history"
+      else
+        echo "FAIL: gitleaks found credentials in the history"
+        exit 1
+      fi
+
   test:
     desc: Run the unit test suite
     cmd: |
