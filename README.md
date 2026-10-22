@@ -108,7 +108,7 @@ task pre-commit   # run every check that gates a commit
 | `task leak-guard:history` | Fail when any commit reachable from any ref carries private material in its message, paths, or files; pass revisions to narrow the scan (`task leak-guard:history -- origin/main..HEAD`) |
 | `task secret-scan:history` | Fail when any commit reachable from any ref carries a credential, scanned by gitleaks |
 | `task format` | Apply the Ruff formatter |
-| `task pre-commit` | Run every pre-commit hook on all files and check the pending commit message |
+| `task pre-commit` | Run every pre-commit hook on all files |
 | `task build` | Build the source distribution and wheel into `dist/` |
 | `task serve` | Serve the checkpoint `.env` configures, downloading it first when `.env` names a URL |
 | `task deploy:preview`, `task deploy`, `task deploy:destroy` | Preview, apply, or delete the DataRobot Workload serving the checkpoint `.env` configures |
@@ -117,7 +117,7 @@ task pre-commit   # run every check that gates a commit
 | `task docker:build` | Build the container image, which holds no weights |
 | `task docker:run` | Run the container image on the checkpoint `.env` configures |
 
-Every task prints an `OK:` or `FAIL:` line. Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/), checked by Commitizen in the `commit-msg` hook. CI runs `task pre-commit` and `task build` on Ubuntu and macOS; the macOS job skips the license header hook because its runners have no docker.
+Every task prints an `OK:` or `FAIL:` line. CI runs `task pre-commit` and `task build` on Ubuntu and macOS; the macOS job skips the license header hook because its runners have no docker.
 
 ### Leak guard
 

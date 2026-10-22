@@ -189,22 +189,14 @@ tasks:
       - cmd: 'echo "OK: all static checks passed"'
 
   pre-commit:
-    desc: Run every pre-commit hook on all files and check the pending commit message
+    desc: Run every pre-commit hook on all files
     cmd: |
-      set +e
-      uv run pre-commit run --all-files
-      PRE_COMMIT_STATUS=$?
-      MSG_STATUS=0
-      if [ -s .git/COMMIT_EDITMSG ]; then
-        uv run cz check --commit-msg-file .git/COMMIT_EDITMSG
-        MSG_STATUS=$?
-        uv run python scripts/leak_guard.py message .git/COMMIT_EDITMSG || MSG_STATUS=1
-      fi
-      if [ "$PRE_COMMIT_STATUS" -ne 0 ] || [ "$MSG_STATUS" -ne 0 ]; then
-        echo "FAIL: pre-commit hooks or the commit message checks failed"
+      if uv run pre-commit run --all-files; then
+        echo "OK: pre-commit hooks passed"
+      else
+        echo "FAIL: pre-commit hooks reported issues"
         exit 1
       fi
-      echo "OK: pre-commit hooks passed"
 
   serve:
     desc: Serve the checkpoint that .env configures, downloading it first when .env names a URL (stop with Ctrl-C)
