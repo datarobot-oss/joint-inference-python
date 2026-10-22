@@ -12,6 +12,14 @@ vars:
   # Starting an xdist worker imports torch, so beyond a few workers
   # startup outweighs the parallel test time.
   TEST_MAX_WORKERS: '{{.TEST_MAX_WORKERS | default "8"}}'
+  # Shared opening of every deploy:* target: install the Pulumi program's
+  # dependencies and select (or create) the stack .env names.
+  DEPLOY_STACK_SETUP: |
+    export PULUMI_BACKEND_URL="${PULUMI_BACKEND_URL:-file://~}"
+    STACK="${JOINTFM_DEPLOY_STACK:-dev}"
+    uv sync --group deploy --quiet
+    cd deploy
+    pulumi stack select --create "$STACK" >/dev/null
 
 tasks:
   default:
@@ -265,6 +273,81 @@ tasks:
         echo "OK: container stopped"
       else
         echo "FAIL: container exited with an error"
+        exit 1
+      fi
+
+  deploy:preview:
+    desc: Preview what task deploy would create or change in DataRobot for the checkpoint .env configures
+    dotenv: [.env]
+    preconditions: &deploy-preconditions
+      - sh: test -f .env
+        msg: "FAIL: .env is missing; copy .env.sample to .env and fill it in"
+      - sh: command -v pulumi >/dev/null 2>&1
+        msg: "FAIL: the pulumi CLI is required; see https://www.pulumi.com/docs/install/"
+      - sh: test -n "${PULUMI_CONFIG_PASSPHRASE+set}"
+        msg: "FAIL: set PULUMI_CONFIG_PASSPHRASE in .env (it may be empty)"
+    cmd: |
+      {{.DEPLOY_STACK_SETUP}}
+      if pulumi preview {{.CLI_ARGS}}; then
+        echo "OK: previewed stack $STACK"
+      else
+        echo "FAIL: preview of stack $STACK failed"
+        exit 1
+      fi
+
+  deploy:
+    desc: "Build the image in DataRobot and run it as a Workload serving the checkpoint .env configures; pulumi up asks before applying (task deploy -- --yes skips that)"
+    dotenv: [.env]
+    preconditions: *deploy-preconditions
+    cmd: |
+      {{.DEPLOY_STACK_SETUP}}
+      if pulumi up {{.CLI_ARGS}}; then
+        echo "OK: deployed stack $STACK; endpoint: $(pulumi stack output endpoint)"
+      else
+        echo "FAIL: deploy of stack $STACK failed"
+        exit 1
+      fi
+
+  deploy:outputs:
+    desc: Print the deployed Workload's endpoint and IDs
+    dotenv: [.env]
+    preconditions: *deploy-preconditions
+    cmd: |
+      {{.DEPLOY_STACK_SETUP}}
+      if pulumi stack output --json; then
+        echo "OK: printed the outputs of stack $STACK"
+      else
+        echo "FAIL: could not read the outputs of stack $STACK"
+        exit 1
+      fi
+
+  deploy:probe:
+    desc: Probe the deployed Workload's health and every return mode it advertises, authenticating with DATAROBOT_API_TOKEN
+    dotenv: [.env]
+    preconditions: *deploy-preconditions
+    cmd: |
+      {{.DEPLOY_STACK_SETUP}}
+      ENDPOINT="$(pulumi stack output endpoint)"
+      cd ..
+      if uv run jointfm-inference probe --service-url "$ENDPOINT" \
+        --header "Authorization: Bearer $DATAROBOT_API_TOKEN" \
+        --timeout-seconds 120 {{.CLI_ARGS}}; then
+        echo "OK: the Workload at $ENDPOINT answered every advertised return mode"
+      else
+        echo "FAIL: probing the Workload at $ENDPOINT failed"
+        exit 1
+      fi
+
+  deploy:destroy:
+    desc: Delete the Workload and Artifact of the stack .env names; pulumi asks before deleting
+    dotenv: [.env]
+    preconditions: *deploy-preconditions
+    cmd: |
+      {{.DEPLOY_STACK_SETUP}}
+      if pulumi destroy {{.CLI_ARGS}}; then
+        echo "OK: destroyed stack $STACK"
+      else
+        echo "FAIL: destroy of stack $STACK failed"
         exit 1
       fi
 

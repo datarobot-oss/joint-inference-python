@@ -221,3 +221,6 @@ __marimo__/
 
 # Leak guard: maintainers' private patterns, which name the material they guard
 /.leak-patterns.private
+
+# Pulumi stack files: per-user state (the passphrase salt); the deploy reads its settings from .env
+deploy/Pulumi.*.yaml

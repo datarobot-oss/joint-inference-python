@@ -56,6 +56,11 @@ dev = [
     "ruff",
     "ty",
 ]
+# The Pulumi program in deploy/; never installed into the serving image.
+deploy = [
+    "pulumi>=3.175",
+    "pulumi-datarobot>=0.12.6",
+]
 
 [tool.uv]
 required-version = ">=0.10"
@@ -98,7 +103,7 @@ major_version_zero = true
 
 [tool.ty]
 environment.python-version = "3.13"
-environment.extra-paths = ["scripts"]
+environment.extra-paths = ["scripts", "deploy"]
 
 [tool.ty.src]
 exclude = ["build/", "dist/"]

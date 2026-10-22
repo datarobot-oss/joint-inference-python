@@ -67,6 +67,21 @@ docker run --rm -p 8080:8080 -v "$PWD/models:/models" \
 
 `task docker:run` does this from `.env`: it passes the file as `--env-file` (so write its values without quotes), mounts the directory of `JOINTFM_INFERENCE_CHECKPOINT_PATH` at `/models`, runs as the calling user so a downloaded file belongs to them, and publishes the container's port 8080 at `.env`'s bind host and port. Options after `--` reach `docker run`, such as `task docker:run -- --gpus all` together with `JOINTFM_INFERENCE_DEVICE=cuda`.
 
+### Deploying to DataRobot
+
+The same `.env` that `task serve` reads also deploys the service to DataRobot as a Workload, a container DataRobot runs and scales behind its own authentication. Fill in the deploy section of [.env.sample](.env.sample) (a DataRobot API endpoint and token, and a Pulumi passphrase), install the [Pulumi CLI](https://www.pulumi.com/docs/install/), and run:
+
+```sh
+task deploy:preview   # show what would be created or changed
+task deploy           # build the image in DataRobot and start the Workload
+task deploy:probe     # check /healthz and every return mode through DataRobot
+task deploy:destroy   # delete the Workload and its image
+```
+
+The [Pulumi program](deploy/stack.py) needs neither docker nor an image registry: it stages a build context under `deploy/build/` and DataRobot builds the image from it. That context is the [container](container/Dockerfile) build plus one [extra stage](deploy/bundled.Dockerfile) that copies the checkpoint at `JOINTFM_INFERENCE_CHECKPOINT_PATH` into the image, so the checkpoint must be a file on the deploying machine; the download settings are not used. The optional service settings of `.env` pass through to the container, and the Workload's resources and replica count come from the `JOINTFM_DEPLOY_*` variables. Both routes require a DataRobot API token as a bearer token: `{"Authorization": "Bearer <token>"}` on requests to `<endpoint>/healthz` and `<endpoint>/predict`, where `task deploy:outputs` prints the endpoint.
+
+Pulumi records what it created in a state backend, by default the local `~/.pulumi`; set `PULUMI_BACKEND_URL` to share state between machines. `JOINTFM_DEPLOY_STACK` names the stack, and each stack is one Workload.
+
 ## Development
 
 Prerequisites: [uv](https://docs.astral.sh/uv/), [Task](https://taskfile.dev/), and docker for the license header hook. Ubuntu, Amazon Linux, and macOS are supported.
@@ -91,6 +106,8 @@ task pre-commit   # run every check that gates a commit
 | `task pre-commit` | Run every pre-commit hook on all files and check the pending commit message |
 | `task build` | Build the source distribution and wheel into `dist/` |
 | `task serve` | Serve the checkpoint `.env` configures, downloading it first when `.env` names a URL |
+| `task deploy:preview`, `task deploy`, `task deploy:destroy` | Preview, apply, or delete the DataRobot Workload serving the checkpoint `.env` configures |
+| `task deploy:outputs`, `task deploy:probe` | Print the deployed Workload's endpoint and IDs, or probe it through DataRobot |
 | `task probe` | Probe the local service, or the services named after `--` |
 | `task docker:build` | Build the container image, which holds no weights |
 | `task docker:run` | Run the container image on the checkpoint `.env` configures |

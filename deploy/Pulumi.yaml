@@ -1,0 +1,8 @@
+name: jointfm-inference-runner
+description: Deploys the JointFM inference runner to DataRobot as a Workload
+runtime:
+  name: python
+  options:
+    # The repository's environment, synced with the deploy dependency group
+    # by the deploy:* Taskfile targets.
+    virtualenv: ../.venv
