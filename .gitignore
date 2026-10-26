@@ -224,3 +224,6 @@ __marimo__/
 
 # Pulumi stack files: per-user state (the passphrase salt); the deploy reads its settings from .env
 deploy/Pulumi.*.yaml
+
+# Written by the DataRobot CLI on every run.
+.datarobot/cli/state.yaml

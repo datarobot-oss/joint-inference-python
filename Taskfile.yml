@@ -198,12 +198,25 @@ tasks:
         exit 1
       fi
 
+  start:
+    desc: "Fill in .env with the DataRobot CLI: dr logs in, writes DATAROBOT_ENDPOINT and DATAROBOT_API_TOKEN, and asks for the rest (dr start runs this)"
+    preconditions:
+      - sh: command -v dr >/dev/null 2>&1
+        msg: "FAIL: task start needs the DataRobot CLI (https://github.com/datarobot-oss/cli); without it, copy .env.template to .env and fill it in"
+    cmd: |
+      if dr dotenv setup --if-needed && dr dotenv update; then
+        echo "OK: .env is filled in"
+      else
+        echo "FAIL: dr could not fill in .env"
+        exit 1
+      fi
+
   serve:
     desc: Serve the checkpoint that .env configures, downloading it first when .env names a URL (stop with Ctrl-C)
     dotenv: [.env]
     preconditions:
       - sh: test -f .env
-        msg: "FAIL: .env is missing; copy .env.sample to .env and fill it in"
+        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
     cmd: |
       STATUS=0
       uv run jointfm-inference serve || STATUS=$?
@@ -251,7 +264,7 @@ tasks:
       - sh: command -v docker >/dev/null 2>&1
         msg: "FAIL: docker is required for docker:run"
       - sh: test -f .env
-        msg: "FAIL: .env is missing; copy .env.sample to .env and fill it in"
+        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
       - sh: test -n "${JOINTFM_INFERENCE_CHECKPOINT_PATH:-}"
         msg: "FAIL: set JOINTFM_INFERENCE_CHECKPOINT_PATH in .env"
     cmd: |
@@ -260,11 +273,17 @@ tasks:
       mkdir -p "$CHECKPOINT_DIR"
       CHECKPOINT_DIR="$(cd "$CHECKPOINT_DIR" && pwd)"
       CHECKPOINT_FILE="$(basename "$JOINTFM_INFERENCE_CHECKPOINT_PATH")"
+      # Pass the service settings by name rather than with --env-file, which
+      # keeps the quotes dr writes around values; the explicit ones below win.
+      set --
+      for NAME in $(env | sed -n 's/^\(JOINTFM_INFERENCE_[A-Z0-9_]*\)=.*/\1/p'); do
+        set -- "$@" --env "$NAME"
+      done
       # The container always listens on 8080 at every address; .env's bind
       # host and port choose where the host publishes it.
       if docker run --rm \
         --user "$(id -u):$(id -g)" \
-        --env-file .env \
+        "$@" \
         --env "JOINTFM_INFERENCE_CHECKPOINT_PATH=/models/$CHECKPOINT_FILE" \
         --env JOINTFM_INFERENCE_BIND_HOST=0.0.0.0 \
         --env JOINTFM_INFERENCE_PORT=8080 \
@@ -283,7 +302,7 @@ tasks:
     dotenv: [.env]
     preconditions: &deploy-preconditions
       - sh: test -f .env
-        msg: "FAIL: .env is missing; copy .env.sample to .env and fill it in"
+        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
       - sh: command -v pulumi >/dev/null 2>&1
         msg: "FAIL: the pulumi CLI is required; see https://www.pulumi.com/docs/install/"
       - sh: test -n "${PULUMI_CONFIG_PASSPHRASE+set}"
@@ -307,6 +326,23 @@ tasks:
         echo "OK: deployed stack $STACK; endpoint: $(pulumi stack output endpoint)"
       else
         echo "FAIL: deploy of stack $STACK failed"
+        exit 1
+      fi
+
+  deploy:bundles:
+    desc: List the resource bundles the DataRobot cluster in .env offers Workloads; any ID is a valid JOINTFM_DEPLOY_BUNDLE
+    dotenv: [.env]
+    preconditions:
+      - sh: test -f .env
+        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
+      - sh: test -n "${DATAROBOT_ENDPOINT:-}" && test -n "${DATAROBOT_API_TOKEN:-}"
+        msg: "FAIL: set DATAROBOT_ENDPOINT and DATAROBOT_API_TOKEN in .env"
+    cmd: |
+      uv sync --group deploy --quiet
+      if uv run python deploy/bundles.py; then
+        echo "OK: listed the Workload bundles at $DATAROBOT_ENDPOINT"
+      else
+        echo "FAIL: could not list the Workload bundles at $DATAROBOT_ENDPOINT"
         exit 1
       fi
 

@@ -36,7 +36,9 @@ outside the layout fails before any backend is imported or network is built.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Final
 
 import torch
@@ -82,6 +84,17 @@ CHECKPOINT_WEIGHTS_DTYPES: Final[Mapping[str, torch.dtype]] = {
 """Weights dtype labels and the dtype each names; loading upcasts to float32."""
 
 JOINTFM_1_GENERATION: Final = "jointfm-1"
+
+_DIGEST_CHUNK_BYTES: Final = 1 << 20
+
+
+def file_sha256(path: Path) -> str:
+    """Return the lowercase hexadecimal SHA-256 digest of one file."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(_DIGEST_CHUNK_BYTES):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def read_checkpoint_file(
@@ -231,6 +244,7 @@ __all__ = [
     "CHECKPOINT_WEIGHTS_DTYPES",
     "CHECKPOINT_WEIGHTS_DTYPE_KEY",
     "JOINTFM_1_GENERATION",
+    "file_sha256",
     "read_checkpoint_file",
     "require_checkpoint_format",
 ]
