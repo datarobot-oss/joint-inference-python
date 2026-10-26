@@ -33,6 +33,8 @@ import tempfile
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from jointfm_inference.model.checkpoint import file_sha256
+
 from .config import InferenceServiceConfig
 
 DOWNLOAD_CHUNK_BYTES = 1 << 20
@@ -82,15 +84,6 @@ def resolve_checkpoint(config: InferenceServiceConfig) -> Path:
         token=config.checkpoint_token,
     )
     return checkpoint_path
-
-
-def file_sha256(path: Path) -> str:
-    """Return the lowercase hexadecimal SHA-256 digest of one file."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(DOWNLOAD_CHUNK_BYTES):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def download_checkpoint(

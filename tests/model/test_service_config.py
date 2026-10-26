@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
+import hashlib
 from http import HTTPStatus
+from pathlib import Path
 
 import pytest
 
@@ -32,26 +34,35 @@ from jointfm_inference.model.service.config import (
     CHECKPOINT_SHA256_ENV,
     CHECKPOINT_TOKEN_ENV,
     CHECKPOINT_URL_ENV,
-    CHECKPOINT_VERSION_ENV,
     MAX_CONCURRENT_REQUESTS_ENV,
     PRECISION_ENV,
 )
 from tests.support.service import clear_service_environment
 
 DIGEST = "ab" * 32
+CHECKPOINT_BYTES = b"checkpoint bytes"
+CHECKPOINT_DIGEST = hashlib.sha256(CHECKPOINT_BYTES).hexdigest()
+
+
+@pytest.fixture
+def checkpoint_path(tmp_path: Path) -> Path:
+    path = tmp_path / "jointfm.pt"
+    path.write_bytes(CHECKPOINT_BYTES)
+    return path
 
 
 @pytest.fixture(autouse=True)
-def _configured_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start every test from the two required variables and nothing else."""
+def _configured_environment(
+    monkeypatch: pytest.MonkeyPatch, checkpoint_path: Path
+) -> None:
+    """Start every test from a present checkpoint file and nothing else."""
     clear_service_environment(monkeypatch)
 
     def _package_version(_name: str) -> str:
         return "9.9.9"
 
     monkeypatch.setattr(service_config, "package_version", _package_version)
-    monkeypatch.setenv(CHECKPOINT_PATH_ENV, "/models/jointfm.pt")
-    monkeypatch.setenv(CHECKPOINT_VERSION_ENV, "example-1")
+    monkeypatch.setenv(CHECKPOINT_PATH_ENV, str(checkpoint_path))
 
 
 def _refused_field() -> str | None:
@@ -61,27 +72,54 @@ def _refused_field() -> str | None:
     return exc_info.value.field
 
 
-def test_from_env_applies_the_defaults_of_every_optional_setting() -> None:
+def test_from_env_applies_the_defaults_of_every_optional_setting(
+    checkpoint_path: Path,
+) -> None:
     config = InferenceServiceConfig.from_env()
 
-    assert config.checkpoint_path == "/models/jointfm.pt"
-    assert config.checkpoint_version == "example-1"
+    assert config.checkpoint_path == str(checkpoint_path)
     assert config.max_sample_count == DEFAULT_MAX_SAMPLE_COUNT
     assert config.max_concurrent_requests == DEFAULT_MAX_CONCURRENT_REQUESTS
     assert config.precision == "bf16"
-    assert config.model_version == "jointfm-inference:9.9.9+ckpt.example-1"
     assert config.checkpoint_url is None
     assert config.checkpoint_sha256 is None
     assert config.checkpoint_token is None
 
 
-@pytest.mark.parametrize("name", [CHECKPOINT_PATH_ENV, CHECKPOINT_VERSION_ENV])
-def test_from_env_requires_the_checkpoint_path_and_version(
-    monkeypatch: pytest.MonkeyPatch, name: str
+def test_from_env_requires_the_checkpoint_path(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """No checkpoint is a default: the operator always names the one served."""
-    monkeypatch.delenv(name)
-    assert _refused_field() == name
+    monkeypatch.delenv(CHECKPOINT_PATH_ENV)
+    assert _refused_field() == CHECKPOINT_PATH_ENV
+
+
+def test_from_env_versions_a_local_checkpoint_by_its_digest() -> None:
+    """The version changes exactly when the weights do, with nothing to configure."""
+    config = InferenceServiceConfig.from_env()
+
+    assert config.checkpoint_version == CHECKPOINT_DIGEST[:12]
+    assert (
+        config.model_version == f"jointfm-inference:9.9.9+ckpt.{CHECKPOINT_DIGEST[:12]}"
+    )
+
+
+def test_from_env_versions_a_download_by_its_configured_digest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A download source names its digest, so the file need not exist yet."""
+    monkeypatch.setenv(CHECKPOINT_PATH_ENV, str(tmp_path / "absent.pt"))
+    monkeypatch.setenv(CHECKPOINT_URL_ENV, "https://example.com/jointfm.pt")
+    monkeypatch.setenv(CHECKPOINT_SHA256_ENV, DIGEST)
+
+    assert InferenceServiceConfig.from_env().checkpoint_version == DIGEST[:12]
+
+
+def test_from_env_refuses_a_missing_local_checkpoint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(CHECKPOINT_PATH_ENV, str(tmp_path / "absent.pt"))
+    assert _refused_field() == CHECKPOINT_PATH_ENV
 
 
 def test_from_env_reads_max_concurrent_requests(

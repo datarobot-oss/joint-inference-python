@@ -30,7 +30,7 @@ from jointfm_inference.model.service import server
 SERVE_DESCRIPTION = (
     "Serve one JointFM checkpoint over HTTP. Configured entirely through "
     "JOINTFM_INFERENCE_* environment variables; JOINTFM_INFERENCE_CHECKPOINT_PATH "
-    "and JOINTFM_INFERENCE_CHECKPOINT_VERSION are required."
+    "is required."
 )
 
 

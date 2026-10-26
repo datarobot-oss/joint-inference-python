@@ -53,6 +53,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "pytest-xdist",
+    "pyyaml",
     "ruff",
     "ty",
 ]
