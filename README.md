@@ -40,13 +40,14 @@ task serve              # serve it on this host
 task probe              # check /healthz and every advertised return mode
 ```
 
-`jointfm-inference serve` takes no options: it reads every setting from `JOINTFM_INFERENCE_*` environment variables, and the `Taskfile` targets load them from `.env`, a git-ignored file that [.env.template](.env.template) documents. The checkpoint is either already at `JOINTFM_INFERENCE_CHECKPOINT_PATH` or downloaded there at startup from `JOINTFM_INFERENCE_CHECKPOINT_URL`. A download needs the file's SHA-256 digest: it streams into a temporary file, is verified, and only then moves into place, and a file already at the path is reused only when its digest matches, so changing the URL never serves the old weights. The service reports the first 12 hexadecimal digits of the checkpoint's SHA-256 digest as `checkpoint_version`, so the version changes exactly when the weights do. The service stops cleanly on SIGINT or SIGTERM.
+`jointfm-inference serve` takes no options: it reads every setting from `JOINTFM_INFERENCE_*` environment variables, and the `Taskfile` targets load them from `.env`, a git-ignored file that [.env.template](.env.template) documents. The checkpoint is either already at `JOINTFM_INFERENCE_CHECKPOINT_PATH` or downloaded there at startup from `JOINTFM_INFERENCE_CHECKPOINT_URL`. A download needs the file's SHA-256 digest: it streams into a temporary file, is verified, and only then moves into place, and a file already at the path is reused only when its digest matches, so changing the URL never serves the old weights. The service stops cleanly on SIGINT or SIGTERM.
 
 With the [DataRobot CLI](https://github.com/datarobot-oss/cli), `task start` (or `dr start`) writes `.env` instead of the copy: `dr` logs in to DataRobot, fills in `DATAROBOT_ENDPOINT` and `DATAROBOT_API_TOKEN`, and asks for the checkpoint and the deploy settings that [.datarobot/cli/jointfm.yaml](.datarobot/cli/jointfm.yaml) defines. The optional settings stay documented in `.env.template`; add any of them to `.env` by hand, and `dr` keeps them on later runs.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `JOINTFM_INFERENCE_CHECKPOINT_PATH` | required | Checkpoint file to serve, or to download to |
+| `JOINTFM_INFERENCE_CHECKPOINT_VERSION` | first 12 hexadecimal digits of the checkpoint's SHA-256 | Version label `/healthz` reports as `checkpoint_version`; the default changes exactly when the weights do |
 | `JOINTFM_INFERENCE_CHECKPOINT_URL` | unset | `https` or `http` URL to download the checkpoint from when the file is absent |
 | `JOINTFM_INFERENCE_CHECKPOINT_SHA256` | unset | Lowercase hexadecimal SHA-256 of the checkpoint; required with a URL, refused without one |
 | `JOINTFM_INFERENCE_CHECKPOINT_TOKEN` | unset | Bearer token sent with the download; only to an `https` URL |

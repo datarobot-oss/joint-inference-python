@@ -46,6 +46,7 @@ import pulumi_datarobot as datarobot
 
 from jointfm_inference.model.service.config import (
     CHECKPOINT_PATH_ENV,
+    CHECKPOINT_VERSION_ENV,
     DEVICE_ENV,
     MAP_LOCATION_ENV,
     MAX_CONCURRENT_REQUESTS_ENV,
@@ -112,6 +113,7 @@ _MEMORY_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*([A-Za-z]*)")
 # Service settings passed through to the container when set. The checkpoint
 # path, download settings, bind host, and port are fixed by the image instead.
 FORWARDED_SERVICE_ENV = (
+    CHECKPOINT_VERSION_ENV,
     MODEL_VERSION_ENV,
     DEVICE_ENV,
     MAP_LOCATION_ENV,

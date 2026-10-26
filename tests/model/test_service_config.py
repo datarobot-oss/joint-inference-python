@@ -34,6 +34,7 @@ from jointfm_inference.model.service.config import (
     CHECKPOINT_SHA256_ENV,
     CHECKPOINT_TOKEN_ENV,
     CHECKPOINT_URL_ENV,
+    CHECKPOINT_VERSION_ENV,
     MAX_CONCURRENT_REQUESTS_ENV,
     PRECISION_ENV,
 )
@@ -113,6 +114,28 @@ def test_from_env_versions_a_download_by_its_configured_digest(
     monkeypatch.setenv(CHECKPOINT_SHA256_ENV, DIGEST)
 
     assert InferenceServiceConfig.from_env().checkpoint_version == DIGEST[:12]
+
+
+def test_from_env_uses_a_configured_version_label(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A set label wins, and the file is not read until the service loads it."""
+    monkeypatch.setenv(CHECKPOINT_PATH_ENV, str(tmp_path / "absent.pt"))
+    monkeypatch.setenv(CHECKPOINT_VERSION_ENV, "example-1")
+
+    config = InferenceServiceConfig.from_env()
+
+    assert config.checkpoint_version == "example-1"
+    assert config.model_version == "jointfm-inference:9.9.9+ckpt.example-1"
+
+
+def test_from_env_treats_an_empty_version_label_as_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(CHECKPOINT_VERSION_ENV, "")
+    assert (
+        InferenceServiceConfig.from_env().checkpoint_version == CHECKPOINT_DIGEST[:12]
+    )
 
 
 def test_from_env_refuses_a_missing_local_checkpoint(

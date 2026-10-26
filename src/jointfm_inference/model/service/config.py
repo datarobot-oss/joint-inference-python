@@ -55,6 +55,7 @@ from .validation import (
 
 ENV_PREFIX = "JOINTFM_INFERENCE_"
 CHECKPOINT_PATH_ENV = f"{ENV_PREFIX}CHECKPOINT_PATH"
+CHECKPOINT_VERSION_ENV = f"{ENV_PREFIX}CHECKPOINT_VERSION"
 CHECKPOINT_URL_ENV = f"{ENV_PREFIX}CHECKPOINT_URL"
 CHECKPOINT_SHA256_ENV = f"{ENV_PREFIX}CHECKPOINT_SHA256"
 CHECKPOINT_TOKEN_ENV = f"{ENV_PREFIX}CHECKPOINT_TOKEN"
@@ -131,13 +132,15 @@ class InferenceServiceConfig:
         file's ``JOINTFM_INFERENCE_CHECKPOINT_SHA256``, optionally with a
         ``JOINTFM_INFERENCE_CHECKPOINT_TOKEN`` sent as a bearer token.
 
-        The checkpoint version is the start of the file's SHA-256 digest, so
-        it changes exactly when the weights do: the configured digest for a
+        ``JOINTFM_INFERENCE_CHECKPOINT_VERSION`` labels the checkpoint. When it
+        is unset, the label is the start of the file's SHA-256 digest, so it
+        changes exactly when the weights do: the configured digest for a
         download source, otherwise the digest of the file at the path.
 
         Raises:
             ServiceError: A required variable is missing, a value is malformed,
-                no download source is set and no file is at the path, or the
+                the version is unset while no download source is set and no
+                file is at the path, or the
                 download variables are set inconsistently: a URL without its
                 digest, a digest or token without a URL, a URL scheme other
                 than ``https`` or ``http``, or a token for a URL that is not
@@ -147,9 +150,11 @@ class InferenceServiceConfig:
         checkpoint_url, checkpoint_sha256, checkpoint_token = (
             _download_source_from_env()
         )
-        checkpoint_version = _checkpoint_digest(checkpoint_path, checkpoint_sha256)[
-            :CHECKPOINT_VERSION_LENGTH
-        ]
+        checkpoint_version = _optional_env(CHECKPOINT_VERSION_ENV)
+        if checkpoint_version is None:
+            checkpoint_version = _checkpoint_digest(checkpoint_path, checkpoint_sha256)[
+                :CHECKPOINT_VERSION_LENGTH
+            ]
         device = os.getenv(DEVICE_ENV, DEFAULT_DEVICE)
         precision = _choice_from_env(
             PRECISION_ENV,
