@@ -71,6 +71,7 @@ def test_settings_forward_only_the_service_settings_that_are_set(
     settings = stack.read_settings(
         _env(
             checkpoint,
+            JOINTFM_INFERENCE_CHECKPOINT_VERSION="dev",
             JOINTFM_INFERENCE_DEVICE="cpu",
             JOINTFM_INFERENCE_PRECISION="",
             JOINTFM_INFERENCE_CHECKPOINT_URL="https://example.com/serving.pt",
@@ -79,7 +80,10 @@ def test_settings_forward_only_the_service_settings_that_are_set(
     )
 
     assert settings.checkpoint_path == checkpoint.resolve()
-    assert settings.service_env == {"JOINTFM_INFERENCE_DEVICE": "cpu"}
+    assert settings.service_env == {
+        "JOINTFM_INFERENCE_CHECKPOINT_VERSION": "dev",
+        "JOINTFM_INFERENCE_DEVICE": "cpu",
+    }
     assert settings.bundle == "cpu.5xlarge"
     assert (settings.cpu, settings.memory, settings.gpu, settings.replicas) == (
         None,

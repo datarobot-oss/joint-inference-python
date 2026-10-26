@@ -30,7 +30,8 @@ from jointfm_inference.model.service import server
 SERVE_DESCRIPTION = (
     "Serve one JointFM checkpoint over HTTP. Configured entirely through "
     "JOINTFM_INFERENCE_* environment variables; JOINTFM_INFERENCE_CHECKPOINT_PATH "
-    "is required."
+    "is required, and JOINTFM_INFERENCE_CHECKPOINT_VERSION defaults to the start "
+    "of the checkpoint's SHA-256 digest."
 )
 
 
