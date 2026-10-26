@@ -38,7 +38,9 @@ def main() -> None:
         os.environ[DATAROBOT_ENDPOINT_ENV], os.environ[DATAROBOT_API_TOKEN_ENV]
     )
     rows = [("ID", "GPU", "VRAM", "CPU", "RAM", "")]
-    for bundle in sorted(bundles, key=lambda b: (b.gpu, b.gpu_memory_bytes, b.memory_bytes)):
+    for bundle in sorted(
+        bundles, key=lambda b: (b.gpu, b.gpu_memory_bytes, b.memory_bytes)
+    ):
         gpu = f"{bundle.gpu} x {bundle.gpu_type}" if bundle.gpu else "-"
         vram = f"{bundle.gpu_memory_bytes / GIB:g} GiB" if bundle.gpu else "-"
         rows.append(
