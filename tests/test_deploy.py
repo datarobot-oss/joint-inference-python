@@ -16,7 +16,10 @@
 
 from __future__ import annotations
 
+import io
+import json
 from pathlib import Path
+from urllib.request import Request
 
 import pytest
 
@@ -28,10 +31,31 @@ def _env(checkpoint: Path, **overrides: str) -> dict[str, str]:
         "DATAROBOT_ENDPOINT": "https://app.datarobot.com/api/v2",
         "DATAROBOT_API_TOKEN": "token",
         "JOINTFM_INFERENCE_CHECKPOINT_PATH": str(checkpoint),
-        "JOINTFM_INFERENCE_CHECKPOINT_VERSION": "dev",
     }
     env.update(overrides)
     return env
+
+
+GIB = 1024**3
+CPU_BUNDLE = stack.ResourceBundle(
+    id="cpu.5xlarge",
+    name="5XL",
+    cpu=2.0,
+    memory_bytes=8 * GIB,
+    gpu=0,
+    gpu_type=None,
+    gpu_memory_bytes=0,
+)
+GPU_BUNDLE = stack.ResourceBundle(
+    id="gpu.a10g",
+    name="GPU - L",
+    cpu=7.0,
+    memory_bytes=26 * GIB,
+    gpu=1,
+    gpu_type="nvidia-a10g-2x",
+    gpu_memory_bytes=24 * GIB,
+)
+BUNDLES = (CPU_BUNDLE, GPU_BUNDLE)
 
 
 @pytest.fixture
@@ -55,22 +79,21 @@ def test_settings_forward_only_the_service_settings_that_are_set(
     )
 
     assert settings.checkpoint_path == checkpoint.resolve()
-    assert settings.service_env == {
-        "JOINTFM_INFERENCE_CHECKPOINT_VERSION": "dev",
-        "JOINTFM_INFERENCE_DEVICE": "cpu",
-    }
+    assert settings.service_env == {"JOINTFM_INFERENCE_DEVICE": "cpu"}
+    assert settings.bundle == "cpu.5xlarge"
     assert (settings.cpu, settings.memory, settings.gpu, settings.replicas) == (
-        2.0,
-        "8GB",
+        None,
+        None,
         None,
         1,
     )
 
 
-def test_settings_read_the_workload_resources(checkpoint: Path) -> None:
+def test_settings_read_the_bundle_and_its_overrides(checkpoint: Path) -> None:
     settings = stack.read_settings(
         _env(
             checkpoint,
+            JOINTFM_DEPLOY_BUNDLE="gpu.a10g",
             JOINTFM_DEPLOY_CPU="4",
             JOINTFM_DEPLOY_MEMORY="16GB",
             JOINTFM_DEPLOY_GPU="1",
@@ -78,12 +101,122 @@ def test_settings_read_the_workload_resources(checkpoint: Path) -> None:
         )
     )
 
+    assert settings.bundle == "gpu.a10g"
     assert (settings.cpu, settings.memory, settings.gpu, settings.replicas) == (
         4.0,
         "16GB",
         1.0,
         2,
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1024", 1024),
+        ("8GB", 8 * 1000**3),
+        ("4096Mi", 4096 * 1024**2),
+        ("2 GiB", 2 * GIB),
+    ],
+)
+def test_memory_sizes_follow_the_workload_api_suffixes(
+    value: str, expected: int
+) -> None:
+    assert stack.memory_bytes(value) == expected
+
+
+def test_fit_keeps_a_cpu_bundle_on_the_configured_device(checkpoint: Path) -> None:
+    settings = stack.read_settings(_env(checkpoint))
+
+    assert stack.fit_to_bundle(settings, BUNDLES) == {}
+
+
+def test_fit_runs_a_gpu_bundle_on_cuda(checkpoint: Path) -> None:
+    """A GPU node with the default cpu device would serve slowly and silently."""
+    settings = stack.read_settings(_env(checkpoint, JOINTFM_DEPLOY_BUNDLE="gpu.a10g"))
+
+    assert stack.fit_to_bundle(settings, BUNDLES) == {
+        "JOINTFM_INFERENCE_DEVICE": "cuda"
+    }
+
+
+def test_fit_keeps_a_named_cuda_device(checkpoint: Path) -> None:
+    settings = stack.read_settings(
+        _env(
+            checkpoint,
+            JOINTFM_DEPLOY_BUNDLE="gpu.a10g",
+            JOINTFM_INFERENCE_DEVICE="cuda:0",
+        )
+    )
+
+    assert stack.fit_to_bundle(settings, BUNDLES) == {
+        "JOINTFM_INFERENCE_DEVICE": "cuda:0"
+    }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"JOINTFM_DEPLOY_BUNDLE": "gpu.h100"}, "not a Workload bundle"),
+        ({"JOINTFM_DEPLOY_CPU": "3"}, "exceeds the 2 CPU"),
+        ({"JOINTFM_DEPLOY_MEMORY": "9GiB"}, "exceeds the 8589934592 bytes"),
+        ({"JOINTFM_DEPLOY_GPU": "1"}, "exceeds the 0 GPU"),
+        ({"JOINTFM_INFERENCE_DEVICE": "cuda"}, "has no GPU"),
+        (
+            {"JOINTFM_DEPLOY_BUNDLE": "gpu.a10g", "JOINTFM_INFERENCE_DEVICE": "cpu"},
+            "has a GPU",
+        ),
+    ],
+)
+def test_fit_refuses_what_the_bundle_cannot_hold(
+    checkpoint: Path, overrides: dict[str, str], message: str
+) -> None:
+    settings = stack.read_settings(_env(checkpoint, **overrides))
+
+    with pytest.raises(ValueError, match=message):
+        stack.fit_to_bundle(settings, BUNDLES)
+
+
+def test_bundles_are_read_from_every_catalog_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gpu_item = {
+        "id": "gpu.a10g",
+        "name": "GPU - L",
+        "cpuCount": 7,
+        "memoryBytes": 26 * GIB,
+        "gpuCount": 1,
+        "gpuTypeLabel": "nvidia-a10g-2x",
+        "gpuMemoryBytes": 24 * GIB,
+    }
+    cpu_item = {
+        "id": "cpu.5xlarge",
+        "name": "5XL",
+        "cpuCount": 2,
+        "memoryBytes": 8 * GIB,
+    }
+    pages = {
+        "https://dr.example/api/v2/mlops/compute/bundles/?useCases=workload": {
+            "data": [cpu_item],
+            "next": "https://dr.example/api/v2/mlops/compute/bundles/?page=2",
+        },
+        "https://dr.example/api/v2/mlops/compute/bundles/?page=2": {
+            "data": [gpu_item],
+            "next": None,
+        },
+    }
+    seen: list[tuple[str, str | None]] = []
+
+    def _urlopen(request: Request, timeout: float) -> io.BytesIO:
+        seen.append((request.full_url, request.get_header("Authorization")))
+        return io.BytesIO(json.dumps(pages[request.full_url]).encode())
+
+    monkeypatch.setattr(stack, "urlopen", _urlopen)
+
+    bundles = stack.fetch_workload_bundles("https://dr.example/api/v2/", "token")
+
+    assert bundles == [CPU_BUNDLE, GPU_BUNDLE]
+    assert [header for _, header in seen] == ["Bearer token", "Bearer token"]
 
 
 def test_a_relative_checkpoint_path_is_taken_from_the_repository_root(
@@ -102,10 +235,7 @@ def test_a_relative_checkpoint_path_is_taken_from_the_repository_root(
     [
         ({"DATAROBOT_API_TOKEN": ""}, "DATAROBOT_API_TOKEN must be set"),
         ({"DATAROBOT_ENDPOINT": "https://app.datarobot.com"}, "must end with /api/v2"),
-        (
-            {"JOINTFM_INFERENCE_CHECKPOINT_VERSION": ""},
-            "CHECKPOINT_VERSION must be set",
-        ),
+        ({"JOINTFM_DEPLOY_MEMORY": "8 apples"}, "must be a size"),
         ({"JOINTFM_DEPLOY_GPU": "0"}, "JOINTFM_DEPLOY_GPU must be positive"),
         (
             {"JOINTFM_DEPLOY_REPLICAS": "0"},

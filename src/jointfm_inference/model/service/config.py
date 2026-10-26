@@ -29,9 +29,11 @@ from __future__ import annotations
 import os
 import re
 from http import HTTPStatus
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from jointfm_inference.core.version import package_version
+from jointfm_inference.model.checkpoint import file_sha256
 from jointfm_inference.model.inference import DEFAULT_INFERENCE_PRECISION
 from jointfm_inference.model.precision import MODEL_PRECISIONS
 
@@ -53,7 +55,6 @@ from .validation import (
 
 ENV_PREFIX = "JOINTFM_INFERENCE_"
 CHECKPOINT_PATH_ENV = f"{ENV_PREFIX}CHECKPOINT_PATH"
-CHECKPOINT_VERSION_ENV = f"{ENV_PREFIX}CHECKPOINT_VERSION"
 CHECKPOINT_URL_ENV = f"{ENV_PREFIX}CHECKPOINT_URL"
 CHECKPOINT_SHA256_ENV = f"{ENV_PREFIX}CHECKPOINT_SHA256"
 CHECKPOINT_TOKEN_ENV = f"{ENV_PREFIX}CHECKPOINT_TOKEN"
@@ -69,6 +70,8 @@ DOWNLOAD_URL_SCHEMES = ("https", "http")
 # A bearer token travels only over TLS.
 TOKEN_URL_SCHEME = "https"
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+# Enough of the digest to tell checkpoints apart while staying readable.
+CHECKPOINT_VERSION_LENGTH = 12
 
 
 class InferenceServiceConfig:
@@ -123,24 +126,30 @@ class InferenceServiceConfig:
     def from_env(cls) -> "InferenceServiceConfig":
         """Build validated runtime configuration from environment variables.
 
-        ``JOINTFM_INFERENCE_CHECKPOINT_PATH`` and
-        ``JOINTFM_INFERENCE_CHECKPOINT_VERSION`` are required. A download
+        ``JOINTFM_INFERENCE_CHECKPOINT_PATH`` is required. A download
         source is ``JOINTFM_INFERENCE_CHECKPOINT_URL`` together with the
         file's ``JOINTFM_INFERENCE_CHECKPOINT_SHA256``, optionally with a
         ``JOINTFM_INFERENCE_CHECKPOINT_TOKEN`` sent as a bearer token.
 
+        The checkpoint version is the start of the file's SHA-256 digest, so
+        it changes exactly when the weights do: the configured digest for a
+        download source, otherwise the digest of the file at the path.
+
         Raises:
             ServiceError: A required variable is missing, a value is malformed,
-                or the download variables are set inconsistently: a URL
-                without its digest, a digest or token without a URL, a URL
-                scheme other than ``https`` or ``http``, or a token for a URL
-                that is not ``https``.
+                no download source is set and no file is at the path, or the
+                download variables are set inconsistently: a URL without its
+                digest, a digest or token without a URL, a URL scheme other
+                than ``https`` or ``http``, or a token for a URL that is not
+                ``https``.
         """
         checkpoint_path = _required_env(CHECKPOINT_PATH_ENV)
-        checkpoint_version = _required_env(CHECKPOINT_VERSION_ENV)
         checkpoint_url, checkpoint_sha256, checkpoint_token = (
             _download_source_from_env()
         )
+        checkpoint_version = _checkpoint_digest(checkpoint_path, checkpoint_sha256)[
+            :CHECKPOINT_VERSION_LENGTH
+        ]
         device = os.getenv(DEVICE_ENV, DEFAULT_DEVICE)
         precision = _choice_from_env(
             PRECISION_ENV,
@@ -181,6 +190,20 @@ class InferenceServiceConfig:
             checkpoint_sha256=checkpoint_sha256,
             checkpoint_token=checkpoint_token,
         )
+
+
+def _checkpoint_digest(checkpoint_path: str, configured_sha256: str | None) -> str:
+    """Return the configured download digest, or the digest of the local file."""
+    if configured_sha256 is not None:
+        return configured_sha256
+    path = Path(checkpoint_path)
+    if not path.is_file():
+        raise _config_error(
+            CHECKPOINT_PATH_ENV,
+            f"{CHECKPOINT_PATH_ENV} names no file and {CHECKPOINT_URL_ENV} is "
+            f"not set: {checkpoint_path}",
+        )
+    return file_sha256(path)
 
 
 def _download_source_from_env() -> tuple[str | None, str | None, str | None]:

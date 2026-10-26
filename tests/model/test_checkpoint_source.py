@@ -27,19 +27,17 @@ from urllib.error import HTTPError
 
 import pytest
 
-from jointfm_inference.model.checkpoint import JOINTFM_1_GENERATION
+from jointfm_inference.model.checkpoint import JOINTFM_1_GENERATION, file_sha256
 from jointfm_inference.model.service import create_service_from_env
 from jointfm_inference.model.service.checkpoint_source import (
     CHECKPOINT_FILE_MODE,
     download_checkpoint,
-    file_sha256,
     resolve_checkpoint,
 )
 from jointfm_inference.model.service.config import (
     CHECKPOINT_PATH_ENV,
     CHECKPOINT_SHA256_ENV,
     CHECKPOINT_URL_ENV,
-    CHECKPOINT_VERSION_ENV,
     DEVICE_ENV,
     PRECISION_ENV,
 )
@@ -202,7 +200,6 @@ def test_service_startup_downloads_and_serves_the_configured_checkpoint(
     target = tmp_path / "models" / "jointfm.pt"
     clear_service_environment(monkeypatch)
     monkeypatch.setenv(CHECKPOINT_PATH_ENV, str(target))
-    monkeypatch.setenv(CHECKPOINT_VERSION_ENV, "example-1")
     monkeypatch.setenv(CHECKPOINT_URL_ENV, origin.url)
     monkeypatch.setenv(CHECKPOINT_SHA256_ENV, _sha256(origin.body))
     monkeypatch.setenv(DEVICE_ENV, "cpu")
@@ -212,4 +209,5 @@ def test_service_startup_downloads_and_serves_the_configured_checkpoint(
 
     assert health["generation"] == JOINTFM_1_GENERATION
     assert health["checkpoint_path"] == str(target)
+    assert health["checkpoint_version"] == _sha256(origin.body)[:12]
     assert target.read_bytes() == origin.body

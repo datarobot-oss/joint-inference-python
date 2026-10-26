@@ -35,17 +35,18 @@ A checkpoint is a plain-data mapping saved with `torch.save` and loaded with `we
 ## Serving
 
 ```sh
-cp .env.sample .env   # name the checkpoint to serve, then:
-task serve            # serve it on this host
-task probe            # check /healthz and every advertised return mode
+cp .env.template .env   # name the checkpoint to serve, then:
+task serve              # serve it on this host
+task probe              # check /healthz and every advertised return mode
 ```
 
-`jointfm-inference serve` takes no options: it reads every setting from `JOINTFM_INFERENCE_*` environment variables, and the `Taskfile` targets load them from `.env`, a git-ignored file that [.env.sample](.env.sample) documents. The checkpoint is either already at `JOINTFM_INFERENCE_CHECKPOINT_PATH` or downloaded there at startup from `JOINTFM_INFERENCE_CHECKPOINT_URL`. A download needs the file's SHA-256 digest: it streams into a temporary file, is verified, and only then moves into place, and a file already at the path is reused only when its digest matches, so changing the URL never serves the old weights. The service stops cleanly on SIGINT or SIGTERM.
+`jointfm-inference serve` takes no options: it reads every setting from `JOINTFM_INFERENCE_*` environment variables, and the `Taskfile` targets load them from `.env`, a git-ignored file that [.env.template](.env.template) documents. The checkpoint is either already at `JOINTFM_INFERENCE_CHECKPOINT_PATH` or downloaded there at startup from `JOINTFM_INFERENCE_CHECKPOINT_URL`. A download needs the file's SHA-256 digest: it streams into a temporary file, is verified, and only then moves into place, and a file already at the path is reused only when its digest matches, so changing the URL never serves the old weights. The service reports the first 12 hexadecimal digits of the checkpoint's SHA-256 digest as `checkpoint_version`, so the version changes exactly when the weights do. The service stops cleanly on SIGINT or SIGTERM.
+
+With the [DataRobot CLI](https://github.com/datarobot-oss/cli), `task start` (or `dr start`) writes `.env` instead of the copy: `dr` logs in to DataRobot, fills in `DATAROBOT_ENDPOINT` and `DATAROBOT_API_TOKEN`, and asks for the checkpoint and the deploy settings that [.datarobot/cli/jointfm.yaml](.datarobot/cli/jointfm.yaml) defines. The optional settings stay documented in `.env.template`; add any of them to `.env` by hand, and `dr` keeps them on later runs.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `JOINTFM_INFERENCE_CHECKPOINT_PATH` | required | Checkpoint file to serve, or to download to |
-| `JOINTFM_INFERENCE_CHECKPOINT_VERSION` | required | Version label `/healthz` reports as `checkpoint_version` |
 | `JOINTFM_INFERENCE_CHECKPOINT_URL` | unset | `https` or `http` URL to download the checkpoint from when the file is absent |
 | `JOINTFM_INFERENCE_CHECKPOINT_SHA256` | unset | Lowercase hexadecimal SHA-256 of the checkpoint; required with a URL, refused without one |
 | `JOINTFM_INFERENCE_CHECKPOINT_TOKEN` | unset | Bearer token sent with the download; only to an `https` URL |
@@ -65,24 +66,26 @@ task probe            # check /healthz and every advertised return mode
 `task docker:build` builds `jointfm-inference:<project version>` from [container/Dockerfile](container/Dockerfile). The image holds the package and its dependencies, never weights: its command is `jointfm-inference serve`, it listens on port 8080, and it expects the checkpoint at `/models/jointfm.pt` unless `JOINTFM_INFERENCE_CHECKPOINT_PATH` says otherwise. `/models` is a volume, so mount a directory there that holds the checkpoint, or one the container may download it into:
 
 ```sh
-docker run --rm -p 8080:8080 -v "$PWD/models:/models" \
-  -e JOINTFM_INFERENCE_CHECKPOINT_VERSION=<label> jointfm-inference:<version>
+docker run --rm -p 8080:8080 -v "$PWD/models:/models" jointfm-inference:<version>
 ```
 
-`task docker:run` does this from `.env`: it passes the file as `--env-file` (so write its values without quotes), mounts the directory of `JOINTFM_INFERENCE_CHECKPOINT_PATH` at `/models`, runs as the calling user so a downloaded file belongs to them, and publishes the container's port 8080 at `.env`'s bind host and port. Options after `--` reach `docker run`, such as `task docker:run -- --gpus all` together with `JOINTFM_INFERENCE_DEVICE=cuda`.
+`task docker:run` does this from `.env`: it passes every `JOINTFM_INFERENCE_*` setting on to the container, mounts the directory of `JOINTFM_INFERENCE_CHECKPOINT_PATH` at `/models`, runs as the calling user so a downloaded file belongs to them, and publishes the container's port 8080 at `.env`'s bind host and port. Options after `--` reach `docker run`, such as `task docker:run -- --gpus all` together with `JOINTFM_INFERENCE_DEVICE=cuda`.
 
 ### Deploying to DataRobot
 
-The same `.env` that `task serve` reads also deploys the service to DataRobot as a Workload, a container DataRobot runs and scales. Fill in the deploy section of [.env.sample](.env.sample) (a DataRobot API endpoint and token, and a Pulumi passphrase), install the [Pulumi CLI](https://www.pulumi.com/docs/install/), and run:
+The same `.env` that `task serve` reads also deploys the service to DataRobot as a Workload, a container DataRobot runs and scales. Fill in the deploy section of [.env.template](.env.template) (a DataRobot API endpoint and token, a Pulumi passphrase, and optionally a resource bundle), install the [Pulumi CLI](https://www.pulumi.com/docs/install/), and run:
 
 ```sh
+task deploy:bundles   # list the resource bundles the cluster offers
 task deploy:preview   # show what would be created or changed
 task deploy           # build the image in DataRobot and start the Workload
 task deploy:probe     # check /healthz and every return mode through DataRobot
 task deploy:destroy   # delete the Workload and its image
 ```
 
-The [Pulumi program](deploy/stack.py) needs neither docker nor an image registry: it stages a build context under `deploy/build/` and DataRobot builds the image from it. That context is the [container](container/Dockerfile) build plus one [extra stage](deploy/bundled.Dockerfile) that copies the checkpoint at `JOINTFM_INFERENCE_CHECKPOINT_PATH` into the image, so the checkpoint must be a file on the deploying machine; the download settings are not used. The optional service settings of `.env` pass through to the container, and the Workload's resources and replica count come from the `JOINTFM_DEPLOY_*` variables. Both routes require a DataRobot API token as a bearer token: `{"Authorization": "Bearer <token>"}` on requests to `<endpoint>/healthz` and `<endpoint>/predict`, where `task deploy:outputs` prints the endpoint.
+The [Pulumi program](deploy/stack.py) needs neither docker nor an image registry: it stages a build context under `deploy/build/` and DataRobot builds the image from it. That context is the [container](container/Dockerfile) build plus one [extra stage](deploy/bundled.Dockerfile) that copies the checkpoint at `JOINTFM_INFERENCE_CHECKPOINT_PATH` into the image, so the checkpoint must be a file on the deploying machine; the download settings are not used. The optional service settings of `.env` pass through to the container.
+
+`JOINTFM_DEPLOY_BUNDLE` picks the node each replica runs on, from the cluster's catalog of resource bundles (default `cpu.5xlarge`, 2 CPU and 8 GiB); `task deploy:bundles` lists them. A bundle with a GPU runs the model on CUDA: the deploy sets `JOINTFM_INFERENCE_DEVICE=cuda`, and refuses a device in `.env` that disagrees with the bundle. `JOINTFM_DEPLOY_CPU`, `JOINTFM_DEPLOY_MEMORY`, and `JOINTFM_DEPLOY_GPU` optionally narrow the container's share of the bundle, and the deploy refuses an override the bundle cannot hold, before it stages or uploads anything. `JOINTFM_DEPLOY_REPLICAS` sets the replica count. Both routes require a DataRobot API token as a bearer token: `{"Authorization": "Bearer <token>"}` on requests to `<endpoint>/healthz` and `<endpoint>/predict`, where `task deploy:outputs` prints the endpoint.
 
 Pulumi records what it created in a state backend, by default the local `~/.pulumi`; set `PULUMI_BACKEND_URL` to share state between machines. `JOINTFM_DEPLOY_STACK` names the stack, and each stack is one Workload.
 
@@ -98,6 +101,7 @@ task pre-commit   # run every check that gates a commit
 | Task | What it does |
 |---|---|
 | `task setup` | Create or reuse `.venv`, sync all dependency groups, install the git hooks, ripgrep, and typos |
+| `task start` | Write `.env` with the DataRobot CLI, which also logs in and fills in the DataRobot endpoint and token |
 | `task run -- <command>` | Run a command inside the project environment |
 | `task test` | Run the unit tests |
 | `task coverage` | Run the unit tests and enforce the coverage floor |
@@ -113,6 +117,7 @@ task pre-commit   # run every check that gates a commit
 | `task serve` | Serve the checkpoint `.env` configures, downloading it first when `.env` names a URL |
 | `task deploy:preview`, `task deploy`, `task deploy:destroy` | Preview, apply, or delete the DataRobot Workload serving the checkpoint `.env` configures |
 | `task deploy:outputs`, `task deploy:probe` | Print the deployed Workload's endpoint and IDs, or probe it through DataRobot |
+| `task deploy:bundles` | List the resource bundles the DataRobot cluster offers Workloads |
 | `task probe` | Probe the local service, or the services named after `--` |
 | `task docker:build` | Build the container image, which holds no weights |
 | `task docker:run` | Run the container image on the checkpoint `.env` configures |

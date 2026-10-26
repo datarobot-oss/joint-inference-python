@@ -1,0 +1,62 @@
+# The .env prompts of dr dotenv setup, which task start runs. dr asks for
+# DATAROBOT_ENDPOINT and DATAROBOT_API_TOKEN itself; .env.template documents
+# every setting, including the optional ones not asked for here.
+---
+root:
+  - env: JOINTFM_INFERENCE_CHECKPOINT_PATH
+    type: string
+    help: >
+      Path of the checkpoint file to serve, or where to download it. A relative
+      path is taken from the repository root.
+  - key: checkpoint_source
+    help: Is the checkpoint already on this machine, or downloaded from a URL?
+    options:
+      - name: A file already at the path
+        value: local
+      - name: Download from a URL
+        value: url
+        requires: checkpoint_download
+  - key: deploy_to_datarobot
+    help: Will you deploy the runner to DataRobot as a Workload (task deploy)?
+    options:
+      - name: "No"
+        value: "no"
+      - name: "Yes"
+        value: "yes"
+        requires: datarobot_deploy
+
+checkpoint_download:
+  - env: JOINTFM_INFERENCE_CHECKPOINT_URL
+    type: string
+    help: An https or http URL of the checkpoint file.
+  - env: JOINTFM_INFERENCE_CHECKPOINT_SHA256
+    type: string
+    help: >
+      SHA-256 digest of the checkpoint file, as 64 lowercase hexadecimal
+      digits. The download is verified against it before it is loaded.
+  - env: JOINTFM_INFERENCE_CHECKPOINT_TOKEN
+    type: secret_string
+    optional: true
+    help: Optional bearer token sent with the download; only sent to an https URL.
+
+datarobot_deploy:
+  - env: PULUMI_CONFIG_PASSPHRASE
+    type: secret_string
+    default: ""
+    optional: true
+    help: >
+      Passphrase that encrypts secrets in the local Pulumi state. It may be
+      empty, but it must stay the same for every deploy of a stack.
+  - env: JOINTFM_DEPLOY_STACK
+    type: string
+    default: dev
+    always_prompt: true
+    help: Stack name. Each stack is one Workload.
+  - env: JOINTFM_DEPLOY_BUNDLE
+    type: string
+    default: cpu.5xlarge
+    always_prompt: true
+    help: >
+      Resource bundle each replica runs on. task deploy:bundles lists the IDs
+      the cluster offers; on app.datarobot.com, DRAWS_g5.2xlarge_frac1_regular
+      is one NVIDIA A10G with 24 GB.

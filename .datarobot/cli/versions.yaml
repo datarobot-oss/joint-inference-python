@@ -1,0 +1,25 @@
+# Tools dr start checks for before it runs task start.
+dr:
+  name: DataRobot CLI
+  minimum-version: 0.5.1
+  command: dr self version
+  url: https://github.com/datarobot-oss/cli
+  install:
+    macos: brew install datarobot-oss/taps/dr-cli
+    linux: brew install datarobot-oss/taps/dr-cli
+task:
+  name: Taskfile task runner
+  minimum-version: 3.43.3
+  command: task --version
+  url: https://taskfile.dev/
+  install:
+    macos: brew install go-task
+    linux: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b "$HOME/.local/bin"
+uv:
+  name: uv Python package manager
+  minimum-version: 0.10.0
+  command: uv self version
+  url: https://docs.astral.sh/uv/getting-started/installation/
+  install:
+    macos: curl -LsSf https://astral.sh/uv/install.sh | sh
+    linux: curl -LsSf https://astral.sh/uv/install.sh | sh

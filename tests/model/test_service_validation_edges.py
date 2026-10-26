@@ -69,7 +69,6 @@ from jointfm_inference.model.service.validation import (
 from tests.support.models import tiny_model, write_checkpoint
 from jointfm_inference.model.service.config import (
     CHECKPOINT_PATH_ENV,
-    CHECKPOINT_VERSION_ENV,
     MAX_CONCURRENT_REQUESTS_ENV,
     PRECISION_ENV,
 )
@@ -765,6 +764,7 @@ def test_slot_is_released_after_forecast_raises_and_after_success() -> None:
 
 def test_max_concurrent_requests_env_var_caps_observed_concurrency(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """End-to-end: ``JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS`` -> from_env -> semaphore.
 
@@ -775,8 +775,9 @@ def test_max_concurrent_requests_env_var_caps_observed_concurrency(
     default, is covered by the blocking test below.
     """
     clear_service_environment(monkeypatch)
-    monkeypatch.setenv(CHECKPOINT_PATH_ENV, "/models/jointfm.pt")
-    monkeypatch.setenv(CHECKPOINT_VERSION_ENV, "example-1")
+    checkpoint_path = tmp_path / "jointfm.pt"
+    checkpoint_path.write_bytes(b"checkpoint bytes")
+    monkeypatch.setenv(CHECKPOINT_PATH_ENV, str(checkpoint_path))
     monkeypatch.setenv(MAX_CONCURRENT_REQUESTS_ENV, "3")
     monkeypatch.setenv(PRECISION_ENV, SERVICE_PRECISION)
 
