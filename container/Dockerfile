@@ -4,7 +4,7 @@
 # checkpoint is mounted at, or downloaded to, JOINTFM_INFERENCE_CHECKPOINT_PATH
 # when the container starts.
 
-FROM ghcr.io/astral-sh/uv:0.13.5-python3.13-trixie-slim AS builder
+FROM ghcr.io/astral-sh/uv:0.13.6-python3.13-trixie-slim AS builder
 
 WORKDIR /workspace
 ENV UV_LINK_MODE=copy
