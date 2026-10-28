@@ -8,6 +8,8 @@ vars:
   TYPOS_VERSION: '{{.TYPOS_VERSION | default "1.45.1"}}'
   # Keep in step with the insert-license hook in .pre-commit-config.yaml.
   SKYWALKING_EYES_VERSION: '{{.SKYWALKING_EYES_VERSION | default "0.8.0"}}'
+  # docker resolves the digest and ignores the tag, which is kept for readers.
+  OSV_SCANNER_IMAGE: ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
   COVERAGE_FAIL_UNDER: '{{.COVERAGE_FAIL_UNDER | default "90"}}'
   # Starting an xdist worker imports torch, so beyond a few workers
   # startup outweighs the parallel test time.
@@ -145,6 +147,19 @@ tasks:
         echo "OK: gitleaks found no credentials in the history"
       else
         echo "FAIL: gitleaks found credentials in the history"
+        exit 1
+      fi
+
+  vuln-scan:
+    desc: Fail when a package pinned in uv.lock has a known vulnerability, scanned by osv-scanner (needs docker)
+    preconditions:
+      - sh: command -v docker >/dev/null 2>&1
+        msg: "FAIL: docker is required for vuln-scan"
+    cmd: |
+      if docker run --rm --volume "$PWD:/src" {{.OSV_SCANNER_IMAGE}} scan source --config /src/osv-scanner.toml --lockfile /src/uv.lock; then
+        echo "OK: osv-scanner found no known vulnerabilities in uv.lock"
+      else
+        echo "FAIL: osv-scanner found known vulnerabilities in uv.lock"
         exit 1
       fi
 
