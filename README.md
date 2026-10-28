@@ -112,6 +112,7 @@ task pre-commit   # run every check that gates a commit
 | `task leak-guard` | Fail when a file in the working tree carries private material in its path or content |
 | `task leak-guard:history` | Fail when any commit reachable from any ref carries private material in its message, paths, or files; pass revisions to narrow the scan (`task leak-guard:history -- origin/main..HEAD`) |
 | `task secret-scan:history` | Fail when any commit reachable from any ref carries a credential, scanned by gitleaks |
+| `task vuln-scan` | Fail when a package pinned in `uv.lock` has a known vulnerability, scanned by osv-scanner (needs docker) |
 | `task format` | Apply the Ruff formatter |
 | `task pre-commit` | Run every pre-commit hook on all files |
 | `task build` | Build the source distribution and wheel into `dist/` |
@@ -132,6 +133,8 @@ This repository is published, so `scripts/leak_guard.py` fails on material that 
 Some rules cannot be published because they name what they guard. Maintainers keep those in a git-ignored `.leak-patterns.private` at the repository root: one Python regular expression per line, blank lines and `#` comment lines skipped. The guard reports whether it loaded the file and runs the public rules alone when it is absent, as in CI. A dangling link fails. A passing guard does not prove a change safe to publish.
 
 Credentials are a separate check: the `gitleaks` pre-commit hook scans each staged change, and `task secret-scan:history` scans every reachable commit in CI.
+
+Known vulnerabilities are a third: `task vuln-scan` checks every package pinned in `uv.lock` against the OSV database on each pull request, each push to `main`, and weekly, since advisories land without a code change. [osv-scanner.toml](osv-scanner.toml) holds the waivers, each with an expiry date, for fixes that are still too new for the `exclude-newer` cooldown in `pyproject.toml`.
 
 Rules for contributors and coding agents are in [AGENTS.md](AGENTS.md).
 

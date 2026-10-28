@@ -36,7 +36,7 @@ Never run a state-changing git command — staging, committing, branching, stash
 
 ## Finishing a change
 
-Run `task pre-commit` and fix every reported issue. Then show the diff, explain why each change is necessary, and end with a suggested commit message in Conventional Commits style (`feat: Message`, `fix: Message`, `docs: Message`).
+Run `task pre-commit` and fix every reported issue. A change that touches only documentation or configuration files — no Python code and no notebooks — needs no final `task pre-commit` run; run `task check` and `task leak-guard` instead, since such files are where private material most often slips in. Then show the diff, explain why each change is necessary, and end with a suggested commit message in Conventional Commits style (`feat: Message`, `fix: Message`, `docs: Message`).
 
 ## Communication
 
