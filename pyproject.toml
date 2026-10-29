@@ -37,7 +37,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/datarobot/joint-inference-python"
+Repository = "https://github.com/datarobot-oss/joint-inference-python"
 
 [project.scripts]
 jointfm-inference = "jointfm_inference.cli:main"
