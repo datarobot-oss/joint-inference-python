@@ -21,6 +21,7 @@ import math
 import threading
 import time
 from http import HTTPStatus
+from http.client import HTTPMessage
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -416,17 +417,17 @@ class _FakeHTTPHandler(JointFMRequestHandler):
     """Minimal request-handler double that records response writes."""
 
     def __init__(self) -> None:
-        self.headers: dict[str, str] = {}
+        self.headers = HTTPMessage()
         self.rfile = BytesIO()
         self.wfile = BytesIO()
         self.path = "/"
-        self.responses: list[int] = []
+        self.response_codes: list[int] = []
         self.sent_headers: list[tuple[str, str]] = []
         self.ended = False
 
     def send_response(self, code: int, message: str | None = None) -> None:
         del message
-        cast(list[int], self.responses).append(code)
+        self.response_codes.append(code)
 
     def send_header(self, keyword: str, value: str) -> None:
         self.sent_headers.append((keyword, value))
@@ -452,7 +453,7 @@ def test_request_handler_reads_json_and_reports_decode_errors() -> None:
     with pytest.raises(ServiceError, match="must be an integer"):
         handler._read_json_body()
 
-    handler.headers["Content-Length"] = "1"
+    handler.headers.replace_header("Content-Length", "1")
     handler.rfile = BytesIO(b"{")
     with pytest.raises(ServiceError, match="not valid JSON"):
         handler._read_json_body()
@@ -479,7 +480,7 @@ def test_request_handler_sends_json_errors_and_dispatches_endpoints() -> None:
 
     handler.path = "/healthz"
     handler.do_GET()
-    assert handler.responses == [HTTPStatus.OK]
+    assert handler.response_codes == [HTTPStatus.OK]
     assert _response_body(handler) == {"status": "ok"}
 
     handler = _FakeHTTPHandler()
@@ -489,13 +490,13 @@ def test_request_handler_sends_json_errors_and_dispatches_endpoints() -> None:
     handler.headers["Content-Length"] = str(len(raw_body))
     handler.rfile = BytesIO(raw_body)
     handler.do_POST()
-    assert handler.responses == [HTTPStatus.OK]
+    assert handler.response_codes == [HTTPStatus.OK]
     assert _response_body(handler) == {"echo": 3}
 
     handler = _FakeHTTPHandler()
     handler.path = "/missing"
     handler.do_GET()
-    assert handler.responses == [HTTPStatus.NOT_FOUND]
+    assert handler.response_codes == [HTTPStatus.NOT_FOUND]
     assert _response_body(handler)["errors"][0]["code"] == "VALIDATION_ERROR"
 
 
@@ -506,7 +507,7 @@ def test_request_handler_rejects_unknown_post_endpoint() -> None:
 
     handler.do_POST()
 
-    assert handler.responses == [HTTPStatus.NOT_FOUND]
+    assert handler.response_codes == [HTTPStatus.NOT_FOUND]
     [error] = _response_body(handler)["errors"]
     assert error["message"] == "Unknown endpoint: /unknown"
     assert error["code"] == "VALIDATION_ERROR"
@@ -547,7 +548,7 @@ def test_request_handler_dispatches_service_errors() -> None:
 
     handler.do_POST()
 
-    assert handler.responses == [HTTPStatus.BAD_REQUEST]
+    assert handler.response_codes == [HTTPStatus.BAD_REQUEST]
     assert _response_body(handler)["errors"][0]["field"] == "value"
 
 
