@@ -1,6 +1,6 @@
 # joint-inference-python
 
-`jointfm-inference` is the inference runner for JointFM: it loads JointFM checkpoints and serves joint probabilistic forecasts over HTTP. Applications talk to a running instance through the [`jointfm-client`](https://github.com/datarobot/joint-client-python) SDK ([PyPI](https://pypi.org/project/jointfm-client/)).
+`jointfm-inference` is the inference runner for JointFM: it loads JointFM checkpoints and serves joint probabilistic forecasts over HTTP. Applications talk to a running instance through the [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python) SDK ([PyPI](https://pypi.org/project/jointfm-client/)).
 
 The repository holds the serving code for JointFM 1 checkpoints, the `jointfm-inference` command, and a container image. Neither the package nor the image contains weights: every service names the checkpoint it serves in its own configuration.
 

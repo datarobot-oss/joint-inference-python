@@ -13,7 +13,7 @@ every commit, pull request, and comment is published.
 ## Reporting issues
 
 - **Bugs and feature requests:** open a GitHub issue at
-  [datarobot/joint-inference-python](https://github.com/datarobot/joint-inference-python/issues)
+  [datarobot-oss/joint-inference-python](https://github.com/datarobot-oss/joint-inference-python/issues)
   with a minimal reproduction, the package version (`version` in `pyproject.toml`), and
   the Python version.
 - **Security issues:** do not open a public issue. Follow [SECURITY.md](SECURITY.md).

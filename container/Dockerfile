@@ -28,7 +28,7 @@ ENV JOINTFM_INFERENCE_CHECKPOINT_PATH=/models/jointfm.pt
 
 LABEL org.opencontainers.image.title="jointfm-inference"
 LABEL org.opencontainers.image.version="$IMAGE_VERSION"
-LABEL org.opencontainers.image.source="https://github.com/datarobot/joint-inference-python"
+LABEL org.opencontainers.image.source="https://github.com/datarobot-oss/joint-inference-python"
 
 COPY --from=builder /opt/jointfm-inference/.venv /opt/jointfm-inference/.venv
 
