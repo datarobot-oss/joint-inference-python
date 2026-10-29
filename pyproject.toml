@@ -110,3 +110,9 @@ environment.extra-paths = ["scripts", "deploy"]
 
 [tool.ty.src]
 exclude = ["build/", "dist/"]
+
+# torch declares `nn.Module.forward` as a mutable `Callable` attribute, so every
+# module that defines `forward` as a method trips this rule.
+[[tool.ty.overrides]]
+include = ["src/jointfm_inference/model/jointfm_1/**"]
+rules = { invalid-mutable-override = "ignore" }
