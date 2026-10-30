@@ -1,44 +1,60 @@
-# joint-inference-python
+<p align="center">
+  <a href="https://github.com/datarobot-oss/joint-inference-python">
+    <img src="https://raw.githubusercontent.com/datarobot-oss/joint-inference-python/main/.github/datarobot_logo.avif" width="600px" alt="DataRobot Logo"/>
+  </a>
+</p>
+<h3 align="center">JointFM Inference Runner</h3>
+
+<p align="center">
+  <a href="https://www.datarobot.com/">Homepage</a>
+  ·
+  <a href="https://github.com/datarobot-oss/joint-client-python">Python client</a>
+  ·
+  <a href="https://docs.datarobot.com/en/docs/get-started/troubleshooting/general-help.html">Support</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/datarobot-oss/joint-inference-python/actions/workflows/ci.yml">
+    <img src="https://github.com/datarobot-oss/joint-inference-python/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <a href="https://github.com/datarobot-oss/joint-inference-python/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/datarobot-oss/joint-inference-python" alt="License">
+  </a>
+</p>
 
 `jointfm-inference` is the inference runner for JointFM: it loads JointFM checkpoints and serves joint probabilistic forecasts over HTTP. Applications talk to a running instance through the [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python) SDK ([PyPI](https://pypi.org/project/jointfm-client/)).
 
 The repository holds the serving code for JointFM 1 checkpoints, the `jointfm-inference` command, and a container image. Neither the package nor the image contains weights: every service names the checkpoint it serves in its own configuration.
 
-**Status: pre-alpha.** The HTTP contract and the checkpoint format may change between releases.
+> **Status: pre-alpha.** The HTTP contract and the checkpoint format may change between releases.
 
-Serving needs a JointFM serving weights file: a JointFM 1 checkpoint in the [format below](#checkpoints). How to obtain one will be documented here.
+## Quickstart
 
-## Layout
+1. **Install the prerequisites:** [uv](https://docs.astral.sh/uv/) and [Task](https://taskfile.dev/). Ubuntu, Amazon Linux, and macOS are supported. Docker is needed only for the [container](#container).
+2. **Get a weights file.** Serving needs a JointFM serving weights file: a JointFM 1 checkpoint in the format the runner reads. How to obtain one will be documented here.
+3. **Clone the repository:**
 
-| Package | Contents |
-|---|---|
-| `jointfm_inference.model.service` | HTTP service: environment configuration, checkpoint download, request validation, conditions, scoring, JSON serialization |
-| `jointfm_inference.model.inference` | Inference session, backend registry, backend-neutral contract, conditioning, the JointFM 1 serving backend |
-| `jointfm_inference.model.jointfm_1` | The JointFM 1 network, its Student-t mixture head, and its checkpoint loader |
-| `jointfm_inference.model` | Checkpoint reading, linear algebra, precision, and the command-line probe |
-| `jointfm_inference.cli` | The `jointfm-inference` command and its `serve` and `probe` subcommands |
-| `jointfm_inference.data` | Canonical samples, request times, DataFrame conversion |
+   ```sh
+   git clone https://github.com/datarobot-oss/joint-inference-python.git
+   cd joint-inference-python
+   ```
 
-## Checkpoints
+4. **Configure the service.** Copy [.env.template](.env.template) to `.env` and set `JOINTFM_INFERENCE_CHECKPOINT_PATH` to the weights file, or to where it should be downloaded together with `JOINTFM_INFERENCE_CHECKPOINT_URL` and `JOINTFM_INFERENCE_CHECKPOINT_SHA256`. With the [DataRobot CLI](https://github.com/datarobot-oss/cli), `task start` writes `.env` instead (see [Configuration](#configuration)).
+5. **Serve it:**
 
-A checkpoint is a plain-data mapping saved with `torch.save` and loaded with `weights_only=True`. Its layout is versioned, and the runner reads exactly format version 1 (`jointfm_inference.model.checkpoint`); a file of any other version, or with any entry outside the layout, is refused before a backend is resolved:
+   ```sh
+   task serve   # creates the environment on first use; stop with Ctrl-C
+   ```
 
-| Entry | Holds |
-| --- | --- |
-| `cfg` | The network sizes; the generation's backend defines the fields |
-| `model_state` | The network's state dict, every floating tensor in the dtype `weights_dtype` names |
-| `runtime_metadata` | Exactly `generation`, `format_version` (`1`), and `weights_dtype` (`fp32`, `bf16`, or `fp16`; loading upcasts to float32) |
-| `inference_metadata` | Exactly `time_index_support` and `data_generation`, the capacity envelope that `/healthz` reports |
+6. **Check it** from a second shell; this requests every return mode the service advertises:
 
-`runtime_metadata.generation` names the generation that wrote the file; the session resolves that marker to a serving backend through the `jointfm_inference.backends` entry-point group and fails at load when no installed distribution registers it. This distribution registers `jointfm-1`.
+   ```sh
+   task probe
+   ```
 
-## Serving
+7. **Forecast** from Python with [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python), pointing its local selector `JOINTFM_LOCAL_BASE_URL` at `http://127.0.0.1:8080`.
 
-```sh
-cp .env.template .env   # name the checkpoint to serve, then:
-task serve              # serve it on this host
-task probe              # check /healthz and every advertised return mode
-```
+## Configuration
 
 `jointfm-inference serve` takes no options: it reads every setting from `JOINTFM_INFERENCE_*` environment variables, and the `Taskfile` targets load them from `.env`, a git-ignored file that [.env.template](.env.template) documents. The checkpoint is either already at `JOINTFM_INFERENCE_CHECKPOINT_PATH` or downloaded there at startup from `JOINTFM_INFERENCE_CHECKPOINT_URL`. A download needs the file's SHA-256 digest: it streams into a temporary file, is verified, and only then moves into place, and a file already at the path is reused only when its digest matches, so changing the URL never serves the old weights. The service stops cleanly on SIGINT or SIGTERM.
 
@@ -62,7 +78,7 @@ With the [DataRobot CLI](https://github.com/datarobot-oss/cli), `task start` (or
 
 `jointfm-inference probe --service-url URL` (repeatable) checks each service's health and requests every return mode it advertises; `task probe` probes the local service, and `task probe -- --service-url URL` any others.
 
-### Container
+## Container
 
 `task docker:build` builds `jointfm-inference:<project version>` from [container/Dockerfile](container/Dockerfile). The image holds the package and its dependencies, never weights: its command is `jointfm-inference serve`, it listens on port 8080, and it expects the checkpoint at `/models/jointfm.pt` unless `JOINTFM_INFERENCE_CHECKPOINT_PATH` says otherwise. `/models` is a volume, so mount a directory there that holds the checkpoint, or one the container may download it into:
 
@@ -72,7 +88,7 @@ docker run --rm -p 8080:8080 -v "$PWD/models:/models" jointfm-inference:<version
 
 `task docker:run` does this from `.env`: it passes every `JOINTFM_INFERENCE_*` setting on to the container, mounts the directory of `JOINTFM_INFERENCE_CHECKPOINT_PATH` at `/models`, runs as the calling user so a downloaded file belongs to them, and publishes the container's port 8080 at `.env`'s bind host and port. Options after `--` reach `docker run`, such as `task docker:run -- --gpus all` together with `JOINTFM_INFERENCE_DEVICE=cuda`.
 
-### Deploying to DataRobot
+## Deploying to DataRobot
 
 The same `.env` that `task serve` reads also deploys the service to DataRobot as a Workload, a container DataRobot runs and scales. Fill in the deploy section of [.env.template](.env.template) (a DataRobot API endpoint and token, a Pulumi passphrase, and optionally a resource bundle), install the [Pulumi CLI](https://www.pulumi.com/docs/install/), and run:
 
@@ -90,54 +106,10 @@ The [Pulumi program](deploy/stack.py) needs neither docker nor an image registry
 
 Pulumi records what it created in a state backend, by default the local `~/.pulumi`; set `PULUMI_BACKEND_URL` to share state between machines. `JOINTFM_DEPLOY_STACK` names the stack, and each stack is one Workload.
 
-## Development
+## Contributing
 
-Prerequisites: [uv](https://docs.astral.sh/uv/), [Task](https://taskfile.dev/), and docker for the license header hook. Ubuntu, Amazon Linux, and macOS are supported.
-
-```sh
-task setup        # create .venv, install dependencies, pre-commit hooks, ripgrep, and typos
-task pre-commit   # run every check that gates a commit
-```
-
-| Task | What it does |
-|---|---|
-| `task setup` | Create or reuse `.venv`, sync all dependency groups, install the git hooks, ripgrep, and typos |
-| `task start` | Write `.env` with the DataRobot CLI, which also logs in and fills in the DataRobot endpoint and token |
-| `task run -- <command>` | Run a command inside the project environment |
-| `task test` | Run the unit tests |
-| `task coverage` | Run the unit tests and enforce the coverage floor |
-| `task check` | Read-only static checks: typos, Ruff lint and format check, ty |
-| `task license-check` | Fail when a Python file lacks the license header (needs docker) |
-| `task license-fix` | Add the license header to every Python file that lacks it (needs docker) |
-| `task leak-guard` | Fail when a file in the working tree carries private material in its path or content |
-| `task leak-guard:history` | Fail when any commit reachable from any ref carries private material in its message, paths, or files; pass revisions to narrow the scan (`task leak-guard:history -- origin/main..HEAD`) |
-| `task secret-scan:history` | Fail when any commit reachable from any ref carries a credential, scanned by gitleaks |
-| `task vuln-scan` | Fail when a package pinned in `uv.lock` has a known vulnerability, scanned by osv-scanner (needs docker) |
-| `task format` | Apply the Ruff formatter |
-| `task pre-commit` | Run every pre-commit hook on all files |
-| `task build` | Build the source distribution and wheel into `dist/` |
-| `task serve` | Serve the checkpoint `.env` configures, downloading it first when `.env` names a URL |
-| `task deploy:preview`, `task deploy`, `task deploy:destroy` | Preview, apply, or delete the DataRobot Workload serving the checkpoint `.env` configures |
-| `task deploy:outputs`, `task deploy:probe` | Print the deployed Workload's endpoint and IDs, or probe it through DataRobot |
-| `task deploy:bundles` | List the resource bundles the DataRobot cluster offers Workloads |
-| `task probe` | Probe the local service, or the services named after `--` |
-| `task docker:build` | Build the container image, which holds no weights |
-| `task docker:run` | Run the container image on the checkpoint `.env` configures |
-
-Every task prints an `OK:` or `FAIL:` line. CI runs `task pre-commit` and `task build` on Ubuntu and macOS; the macOS job skips the license header hook because its runners have no docker.
-
-### Leak guard
-
-This repository is published, so `scripts/leak_guard.py` fails on material that must stay private: proprietary file headers, DataRobot object IDs, internal hosts and private addresses, links to non-public repositories, planning labels, names of unreleased model generations, and credential shapes. It runs as a pre-commit hook over the working tree, as a `commit-msg` hook over each message, and in CI over the full history, because a published history cannot be cleaned.
-
-Some rules cannot be published because they name what they guard. Maintainers keep those in a git-ignored `.leak-patterns.private` at the repository root: one Python regular expression per line, blank lines and `#` comment lines skipped. The guard reports whether it loaded the file and runs the public rules alone when it is absent, as in CI. A dangling link fails. A passing guard does not prove a change safe to publish.
-
-Credentials are a separate check: the `gitleaks` pre-commit hook scans each staged change, and `task secret-scan:history` scans every reachable commit in CI.
-
-Known vulnerabilities are a third: `task vuln-scan` checks every package pinned in `uv.lock` against the OSV database on each pull request, each push to `main`, and weekly, since advisories land without a code change. [osv-scanner.toml](osv-scanner.toml) holds the waivers, each with an expiry date, for fixes that are still too new for the `exclude-newer` cooldown in `pyproject.toml`.
-
-Rules for contributors and coding agents are in [AGENTS.md](AGENTS.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup, every `task` target, the package layout, the checkpoint format, and the checks that keep this public repository free of private material. Rules for contributors and coding agents are in [AGENTS.md](AGENTS.md).
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE). Every Python file carries the license header that [.licenserc.yaml](.licenserc.yaml) defines; the `insert-license` pre-commit hook adds it with [skywalking-eyes](https://github.com/apache/skywalking-eyes), which runs as a docker image.
+Licensed under the [Apache License, Version 2.0](LICENSE).
