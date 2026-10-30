@@ -13,7 +13,7 @@ This repository is published. Anyone can read every file and every commit in its
 - planning documents, roadmap or milestone labels, or ticket codes;
 - links to, or references into, private repositories.
 
-`task leak-guard` (a pre-commit hook), a `commit-msg` hook, and `task leak-guard:history` (in CI) enforce what can be checked mechanically, adding a maintainer's git-ignored `.leak-patterns.private` rules when present; see the README. A passing guard does not make a change safe to publish. Never weaken a rule to get a change through; remove the material instead.
+`task leak-guard` (a pre-commit hook), a `commit-msg` hook, and `task leak-guard:history` (in CI) enforce what can be checked mechanically, adding a maintainer's git-ignored `.leak-patterns.private` rules when present; see [CONTRIBUTING.md](CONTRIBUTING.md). A passing guard does not make a change safe to publish. Never weaken a rule to get a change through; remove the material instead.
 
 Dependencies point one way: this project depends only on public packages and never on private code. Private code may build on it through its public interfaces. When unsure whether something is safe to publish, leave it out and ask.
 
@@ -40,4 +40,4 @@ Run `task pre-commit` and fix every reported issue. A change that touches only d
 
 ## Communication
 
-Lead with the outcome: what now works, what the answer is, and anything the user must decide or act on. Evidence follows underneath — file and line references, command output, measured numbers. Leave out what the user can already see: no restatement of the request, no narration of steps taken, no closing summary. Present a set of items compared along the same few dimensions as a Markdown table. Before asking the user a question, explain the context and terminology it depends on. Do not mention or recommend credential rotation.
+Lead with the outcome: what now works, what the answer is, and anything the user must decide or act on. Evidence follows underneath — file and line references, command output, measured numbers. Leave out what the user can already see: no restatement of the request, no narration of steps taken, no closing summary. Present a set of items compared along the same few dimensions as a Markdown table. Before asking the user a question, explain the context and terminology it depends on.
