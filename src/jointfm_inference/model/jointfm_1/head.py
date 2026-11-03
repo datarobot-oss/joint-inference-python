@@ -25,6 +25,8 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from jointfm_inference.model.jointfm_1.readouts import (
+    MEAN_OUTPUT,
+    RAW_DIAG_OUTPUT,
     ColumnFactorReadout,
     ColumnLocationReadout,
     emit_lowrank_covariance,
@@ -104,15 +106,21 @@ class StudentTHead(nn.Module):
     """Mixture of ``K`` multivariate Student-t distributions per horizon.
 
     Every component covariance is ``diag(d) + U U^T`` with a rank
-    ``covariance_rank`` factor ``U``. The mixture logits, degrees of freedom,
-    pooled means and pooled covariance diagonal are decoded from the pooled
-    per-horizon context; each column's factor rows and its mean and diagonal
-    offsets are decoded from that column's own horizon token. A component's
-    degrees of freedom are ``min_df + exp(out_log_df(h))``, so the projection
-    emits the log of their excess over the floor. Emitted keys:
+    ``covariance_rank`` factor ``U``. The mixture logits and degrees of
+    freedom describe the whole sample and are decoded from the pooled
+    per-horizon context alone. Every column's mean and raw covariance diagonal
+    is a base shared by all columns, decoded from the pooled context
+    (``mean_base`` and ``raw_diag_base``, one value per component), plus that
+    column's term decoded from its own horizon token
+    (:class:`ColumnLocationReadout`); each column's factor rows come from its
+    own token too (:class:`ColumnFactorReadout`). No output depends on a
+    column's position, so permuting the columns permutes every per-column
+    parameter. A component's degrees of freedom are
+    ``min_df + exp(out_log_df(h))``, so the projection emits the log of their
+    excess over the floor. Emitted keys:
     ``logits`` ``(B, H, K)``, ``means`` ``(B, H, K, D)``, ``df`` ``(B, H, K)``,
     ``lowrank_diag`` ``(B, H, K, D)`` and ``lowrank_U`` ``(B, H, K, D, rank)``,
-    with ``D`` the column capacity.
+    with ``D`` the column capacity, which sizes no parameter.
     """
 
     def __init__(
@@ -143,9 +151,9 @@ class StudentTHead(nn.Module):
         self.trunk = nn.Sequential(*layers)
 
         self.out_logits = nn.Linear(trunk_hidden, K)
-        self.out_means = nn.Linear(trunk_hidden, K * D)
+        self.mean_base = nn.Linear(trunk_hidden, K)
         self.out_log_df = nn.Linear(trunk_hidden, K)
-        self.out_diag = nn.Linear(trunk_hidden, K * D)
+        self.raw_diag_base = nn.Linear(trunk_hidden, K)
         self.column_location = ColumnLocationReadout(
             column_dim=d_model,
             context_dim=trunk_hidden,
@@ -167,16 +175,13 @@ class StudentTHead(nn.Module):
             x: ``(B, H, d_model)`` pooled per-horizon context.
             column_tokens: ``(B, H, D_active, d_model)`` per-column horizon
                 tokens; absent columns up to the capacity ``D`` get zero
-                factor rows and offsets.
+                factor rows and sit at the shared base.
         """
-        B, H, _ = x.shape
         h = self.trunk(x)
-        mean_offset, raw_diag_offset = self.column_location(
-            column_tokens, h, capacity=self.D
-        )
+        column_terms = self.column_location(column_tokens, h, capacity=self.D)
         logits = self.out_logits(h)
-        means = self.out_means(h).reshape(B, H, self.K, self.D) + mean_offset
-        log_df_excess = self.out_log_df(h).reshape(B, H, self.K)
+        means = self.mean_base(h).unsqueeze(-1) + column_terms[..., MEAN_OUTPUT]
+        log_df_excess = self.out_log_df(h)
         df = (
             torch.exp(log_df_excess.clamp(max=MAX_LOG_DF_EXCESS)) + self.min_df + DF_EPS
         )
@@ -187,8 +192,8 @@ class StudentTHead(nn.Module):
         out = {"logits": logits, "means": means, "df": df}
         out.update(
             emit_lowrank_covariance(
-                raw_diag=self.out_diag(h).reshape(B, H, self.K, self.D)
-                + raw_diag_offset,
+                raw_diag=self.raw_diag_base(h).unsqueeze(-1)
+                + column_terms[..., RAW_DIAG_OUTPUT],
                 column_factor=self.column_factor,
                 hidden=h,
                 column_tokens=column_tokens,

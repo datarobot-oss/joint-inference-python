@@ -87,6 +87,12 @@ layout, is refused before a backend is resolved:
 marker to a serving backend through the `jointfm_inference.backends` entry-point group and fails
 at load when no installed distribution registers it. This distribution registers `jointfm-1`.
 
+The format version covers this mapping, not the network inside it: the parameter names and shapes
+of `model_state` belong to the generation's network, which loads them with `strict=True`. A state
+dict written for another layout of that network is refused at load with an error that names every
+missing, unexpected, and reshaped parameter. The JointFM 1 network holds no parameter indexed by a
+column's position, so permuting a request's columns permutes every per-column output.
+
 ## Keeping the repository publishable
 
 This repository is published, so `scripts/leak_guard.py` fails on material that must stay private:

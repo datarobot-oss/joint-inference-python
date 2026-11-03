@@ -14,16 +14,20 @@
 
 """Tests for the per-column location readout of the Student-t head.
 
-The readout adds a per-column offset to the pooled means and to the raw
-covariance diagonal, decoded from each column's own horizon token: a column's
-mean and diagonal follow that column's token rather than its output position.
+Every column's mean and raw covariance diagonal is a base shared by all
+columns plus a term the readout decodes from that column's own horizon token: a
+column's mean and diagonal follow that column's token rather than its output
+position.
 """
 
 import pytest
 import torch
 
 from jointfm_inference.model.jointfm_1.head import StudentTHead
-from jointfm_inference.model.jointfm_1.readouts import ColumnLocationReadout
+from jointfm_inference.model.jointfm_1.readouts import (
+    LOCATION_OUTPUTS,
+    ColumnLocationReadout,
+)
 
 from tests.support.inference import student_t_head
 
@@ -31,18 +35,8 @@ B, H, D_CAP, K, D_MODEL = 2, 3, 5, 2, 16
 
 
 def _head() -> StudentTHead:
-    """Build a head whose pooled means and diagonal are the same for every column.
-
-    With the position-specific pooled outputs flattened, any difference between
-    columns comes from the per-column readout alone.
-    """
-    head = student_t_head(D=D_CAP, K=K, d_model=D_MODEL, covariance_rank=2)
-    with torch.no_grad():
-        head.out_means.weight.zero_()
-        head.out_means.bias.zero_()
-        head.out_diag.weight.zero_()
-        head.out_diag.bias.zero_()
-    return head
+    """Build a low-rank Student-t head over ``D_CAP`` columns."""
+    return student_t_head(D=D_CAP, K=K, d_model=D_MODEL, covariance_rank=2)
 
 
 def _inputs(active_dim: int = D_CAP) -> tuple[torch.Tensor, torch.Tensor]:
@@ -70,18 +64,35 @@ def test_means_and_diagonal_follow_the_column_token() -> None:
     assert not torch.allclose(base["means"][..., 0], base["means"][..., 1])
 
 
-def test_readout_refuses_more_columns_than_the_head_has() -> None:
+def test_without_column_terms_every_column_sits_at_the_shared_base() -> None:
+    """No output position carries a location of its own."""
+    head = _head()
+    with torch.no_grad():
+        head.column_location.readout.output.weight.zero_()
+    x, tokens = _inputs()
+    with torch.no_grad():
+        params = head(x, column_tokens=tokens)
+
+    for key in ("means", "lowrank_diag"):
+        torch.testing.assert_close(
+            params[key], params[key][..., :1].expand(-1, -1, -1, D_CAP)
+        )
+
+
+def test_readout_pads_absent_columns_with_zero_terms_and_refuses_extra_ones() -> None:
     torch.manual_seed(2)
     readout = ColumnLocationReadout(
         column_dim=D_MODEL, context_dim=8, hidden=8, n_components=K
     )
     context = torch.randn(B, H, 8)
+    active_dim = D_CAP - 2
 
-    mean_offset, raw_diag_offset = readout(
-        torch.randn(B, H, D_CAP, D_MODEL), context, capacity=D_CAP
+    terms = readout(torch.randn(B, H, active_dim, D_MODEL), context, capacity=D_CAP)
+
+    assert terms.shape == (B, H, K, D_CAP, LOCATION_OUTPUTS)
+    assert terms[..., :active_dim, :].abs().sum() > 0
+    assert torch.equal(
+        terms[..., active_dim:, :], torch.zeros_like(terms[..., active_dim:, :])
     )
-
-    assert mean_offset.shape == (B, H, K, D_CAP)
-    assert raw_diag_offset.shape == (B, H, K, D_CAP)
     with pytest.raises(ValueError, match="exceeding the head capacity"):
         readout(torch.randn(B, H, D_CAP + 1, D_MODEL), context, capacity=D_CAP)

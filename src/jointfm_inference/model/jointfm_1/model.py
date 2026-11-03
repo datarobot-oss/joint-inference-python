@@ -71,6 +71,13 @@ class JointFM(nn.Module):
     tokens are pooled, and the Student-t head decodes the joint distribution
     of all columns at every queried horizon in one pass. Emitted locations and
     scales are mapped back to data space.
+
+    No parameter is indexed by a column's position: a token carries its value,
+    time, and token type, and the encoder joins a column's tokens by their
+    place on that column's time axis. Permuting the history's columns therefore
+    permutes every per-column output and leaves the mixture logits and degrees
+    of freedom unchanged; the column capacity only bounds the padding of the
+    head's per-column outputs.
     """
 
     def __init__(self, cfg: JointFMConfig):
@@ -79,7 +86,6 @@ class JointFM(nn.Module):
         self.cfg = cfg
         self.D = cfg.column_capacity
         self.value_embed = nn.Linear(1, cfg.d_value)
-        self.var_embed = nn.Embedding(self.D, cfg.d_model)
         self.token_type_embed = nn.Embedding(TOKEN_TYPES, cfg.d_model)
         self.time_embed = SinusoidalPosition(
             cfg.d_model,
@@ -89,7 +95,7 @@ class JointFM(nn.Module):
         self.horizon_embed = SinusoidalPosition(
             cfg.d_model, cfg.max_time_fut, base_freq=cfg.horizon_freq_base
         )
-        self.combine = nn.Linear(cfg.d_value + cfg.d_model, cfg.d_model)
+        self.combine = nn.Linear(cfg.d_value, cfg.d_model)
         self.encoder = FactoredEncoder(
             num_layers=cfg.num_layers,
             d_model=cfg.d_model,
@@ -128,15 +134,12 @@ class JointFM(nn.Module):
         """Return ``(B, T * D, d_model)`` time-major tokens of the standardized history."""
         batch_size, T_ctx, active_dim = past.shape
         device = past.device
-        val_emb = self.value_embed(past.unsqueeze(-1))
-        var_ids = torch.arange(active_dim, device=device).view(1, 1, active_dim)
-        var_emb = self.var_embed(var_ids.expand(batch_size, T_ctx, active_dim))
         time_idx = time_indices.view(1, T_ctx, 1).expand(batch_size, T_ctx, active_dim)
         token_type = self.token_type_embed(
             torch.full((1,), PAST_TOKEN_TYPE, device=device, dtype=torch.long)
         ).view(1, 1, 1, -1)
         tokens = (
-            self.combine(torch.cat([val_emb, var_emb], dim=-1))
+            self.combine(self.value_embed(past.unsqueeze(-1)))
             + self.time_embed(time_idx)
             + token_type
         )
@@ -147,22 +150,24 @@ class JointFM(nn.Module):
     ) -> Tensor:
         """Return ``(1, H * D_active, d_model)`` horizon-major query tokens.
 
-        A query token sums the column, horizon, and query-type embeddings and
-        the time embedding at ``origin_index + 1 + horizon``.
+        A query token sums the horizon and query-type embeddings and the time
+        embedding at ``origin_index + 1 + horizon``, so the queries of one
+        horizon are identical across columns: the query of column ``d`` takes
+        its column's identity only from sitting on column ``d``'s time axis,
+        where the encoder's time attention joins it to that column's history.
         """
         horizon_count = horizons.shape[0]
         device = horizons.device
         hz_emb = self.horizon_embed(horizons)
         if self.cfg.horizon_embed_scale != 1.0:
             hz_emb = hz_emb * self.cfg.horizon_embed_scale
-        hz_emb = hz_emb.view(1, horizon_count, 1, -1)
-        var_ids = torch.arange(active_dim, device=device).view(1, 1, active_dim)
-        var_emb = self.var_embed(var_ids).view(1, 1, active_dim, -1)
         token_type = self.token_type_embed(
             torch.full((1,), QUERY_TOKEN_TYPE, device=device, dtype=torch.long)
-        ).view(1, 1, 1, -1)
-        tokens = (var_emb + hz_emb + token_type).expand(
-            1, horizon_count, active_dim, -1
+        )
+        tokens = (
+            (hz_emb + token_type)
+            .view(1, horizon_count, 1, -1)
+            .expand(1, horizon_count, active_dim, -1)
         )
         time_emb = self.time_embed(horizons + (origin_index + 1)).view(
             1, horizon_count, 1, -1

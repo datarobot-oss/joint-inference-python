@@ -90,6 +90,35 @@ def test_a_per_column_affine_change_of_units_moves_the_forecast_with_it() -> Non
     )
 
 
+def test_permuting_the_columns_permutes_every_per_column_output() -> None:
+    """No parameter depends on a column's position, so the network is column-equivariant.
+
+    The location readout's output layer is redrawn at random so every column's
+    mean and diagonal carry a column-specific term on top of the shared base.
+    """
+    model = tiny_model()
+    output = model.head.column_location.readout.output.weight
+    with torch.no_grad():
+        output.copy_(
+            torch.randn(output.shape, generator=torch.Generator().manual_seed(7))
+        )
+    past = _past()
+    perm = torch.tensor([2, 0, 1])
+    horizons = torch.arange(HORIZONS)
+    with torch.no_grad():
+        base = model(past, horizons)
+        permuted = model(past[..., perm], horizons)
+
+    assert not torch.allclose(base["means"][..., 0], base["means"][..., 1])
+    torch.testing.assert_close(permuted["logits"], base["logits"])
+    torch.testing.assert_close(permuted["df"], base["df"])
+    torch.testing.assert_close(permuted["means"], base["means"][..., perm])
+    torch.testing.assert_close(
+        permuted["lowrank_diag"], base["lowrank_diag"][..., perm]
+    )
+    torch.testing.assert_close(permuted["lowrank_U"], base["lowrank_U"][..., perm, :])
+
+
 def test_forward_refuses_more_columns_than_the_capacity_and_misshaped_time_indices() -> (
     None
 ):
