@@ -15,7 +15,7 @@
 """Tests for rebuilding a JointFM 1 network from a checkpoint mapping."""
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 import torch
@@ -122,3 +122,77 @@ def test_a_state_dict_with_an_unexpected_parameter_is_refused() -> None:
     }
     with pytest.raises(RuntimeError, match="extra.weight"):
         load_model_from_checkpoint(checkpoint)
+
+
+def _with_slot_embedding(state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Add the retired per-column slot embedding and the ``combine`` that read it."""
+    d_model = TINY_CONFIG.d_model
+    return {
+        **state,
+        "var_embed.weight": torch.zeros(TINY_CONFIG.column_capacity, d_model),
+        "combine.weight": torch.zeros(d_model, TINY_CONFIG.d_value + d_model),
+    }
+
+
+def _with_slot_indexed_locations(
+    state: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    """Replace the shared location bases by the retired slot-indexed output rows."""
+    rows = TINY_CONFIG.n_mixtures * TINY_CONFIG.column_capacity
+    retired = {
+        name: value
+        for name, value in state.items()
+        if not name.startswith(("head.mean_base.", "head.raw_diag_base."))
+    }
+    for projection in ("out_means", "out_diag"):
+        retired[f"head.{projection}.weight"] = torch.zeros(rows, TINY_CONFIG.d_model)
+        retired[f"head.{projection}.bias"] = torch.zeros(rows)
+    return retired
+
+
+def _with_column_slot_layout(
+    state: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    """Rewrite ``state`` into the whole retired layout."""
+    return _with_slot_indexed_locations(_with_slot_embedding(state))
+
+
+SLOT_EMBEDDING_ERRORS = ('"var_embed.weight"', "size mismatch for combine.weight")
+SLOT_INDEXED_LOCATION_ERRORS = (
+    '"head.out_means.weight"',
+    '"head.out_diag.weight"',
+    '"head.mean_base.weight"',
+    '"head.raw_diag_base.weight"',
+)
+
+
+@pytest.mark.parametrize(
+    ("retire", "named"),
+    [
+        (_with_slot_embedding, SLOT_EMBEDDING_ERRORS),
+        (_with_slot_indexed_locations, SLOT_INDEXED_LOCATION_ERRORS),
+        (
+            _with_column_slot_layout,
+            SLOT_EMBEDDING_ERRORS + SLOT_INDEXED_LOCATION_ERRORS,
+        ),
+    ],
+    ids=["slot-embedding", "slot-indexed-locations", "whole-layout"],
+)
+def test_an_export_with_column_slot_parameters_is_refused_by_name(
+    retire: Callable[[dict[str, torch.Tensor]], dict[str, torch.Tensor]],
+    named: tuple[str, ...],
+) -> None:
+    """The network holds no parameter indexed by column position.
+
+    An export that still carries the per-column slot embedding or the
+    slot-indexed location rows fails the strict load, and the error names
+    every retired, missing, or reshaped parameter.
+    """
+    checkpoint = _checkpoint()
+    checkpoint["model_state"] = retire(dict(checkpoint["model_state"]))
+
+    with pytest.raises(RuntimeError) as refusal:
+        load_model_from_checkpoint(checkpoint)
+
+    for fragment in named:
+        assert fragment in str(refusal.value)

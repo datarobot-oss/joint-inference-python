@@ -36,8 +36,8 @@ class JointFMConfig:
 
     Attributes:
         num_layers: Factored encoder layers.
-        column_capacity: Most columns one request may carry; the size of the
-            column embedding table and of every per-column head output.
+        column_capacity: Most columns one request may carry; the size every
+            per-column head output is padded to. It sizes no parameter.
         n_mixtures: Student-t mixture components per horizon.
         covariance_rank: Rank of each component's low-rank covariance factor.
         d_value: Width of the scalar value embedding.

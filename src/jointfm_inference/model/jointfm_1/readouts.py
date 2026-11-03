@@ -27,8 +27,11 @@ from torch import Tensor
 # degrees of freedom, and downstream samples finite.
 MAX_SOFTPLUS = 1e4
 
-# One mean offset and one raw covariance-diagonal offset per column and component.
-OFFSETS_PER_COMPONENT = 2
+# Positions of the per-column location terms along the readout's output axis.
+MEAN_OUTPUT = 0
+RAW_DIAG_OUTPUT = 1
+# One mean term and one raw covariance-diagonal term per column and component.
+LOCATION_OUTPUTS = 2
 
 
 class ColumnFactorReadout(nn.Module):
@@ -111,12 +114,17 @@ def _pad_columns(rows: Tensor, capacity: int) -> Tensor:
 
 
 class ColumnLocationReadout(nn.Module):
-    """Emit each column's mean and raw-diagonal offsets from its own token.
+    """Emit the column-specific part of each column's location from its own token.
 
-    ``forward(column_tokens, context, capacity)`` returns ``(mean_offset,
-    raw_diag_offset)``, each ``(B, H, K, capacity)``: additive offsets to the
-    pooled means and to the pooled covariance diagonal before its softplus,
-    zero for absent columns.
+    ``forward(column_tokens, context, capacity)`` takes the per-column horizon
+    tokens ``(B, H, D_active, column_dim)`` and the pooled per-horizon context
+    ``(B, H, context_dim)`` and returns ``(B, H, K, capacity,
+    LOCATION_OUTPUTS)``: per column and component, the term added to the mean
+    base shared by all columns (:data:`MEAN_OUTPUT`) and the term added to the
+    shared raw covariance-diagonal base before its softplus
+    (:data:`RAW_DIAG_OUTPUT`); absent columns get zero terms. The one MLP is
+    applied to every column's own token, so permuting the columns permutes the
+    terms, as :class:`ColumnFactorReadout` does for the factor rows.
     """
 
     def __init__(
@@ -129,15 +137,12 @@ class ColumnLocationReadout(nn.Module):
             context_dim=context_dim,
             hidden=hidden,
             n_components=n_components,
-            rank=OFFSETS_PER_COMPONENT,
+            rank=LOCATION_OUTPUTS,
         )
 
-    def forward(
-        self, column_tokens: Tensor, context: Tensor, capacity: int
-    ) -> tuple[Tensor, Tensor]:
-        """Return ``(mean_offset, raw_diag_offset)`` as ``(B, H, K, capacity)``."""
-        rows = _pad_columns(self.readout(column_tokens, context), capacity)
-        return rows[..., 0], rows[..., 1]
+    def forward(self, column_tokens: Tensor, context: Tensor, capacity: int) -> Tensor:
+        """Return the per-column terms as ``(B, H, K, capacity, LOCATION_OUTPUTS)``."""
+        return _pad_columns(self.readout(column_tokens, context), capacity)
 
 
 def emit_lowrank_covariance(
@@ -172,7 +177,10 @@ def emit_lowrank_covariance(
 
 
 __all__ = [
+    "LOCATION_OUTPUTS",
     "MAX_SOFTPLUS",
+    "MEAN_OUTPUT",
+    "RAW_DIAG_OUTPUT",
     "ColumnFactorReadout",
     "ColumnLocationReadout",
     "emit_lowrank_covariance",
