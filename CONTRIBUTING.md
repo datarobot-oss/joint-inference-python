@@ -54,6 +54,9 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | `task probe` | Probe the local service, or the services named after `--` |
 | `task docker:build` | Build the container image, which holds no weights |
 | `task docker:run` | Run the container image on the checkpoint `.env` configures |
+| `task release:dry` | Preview the next version and its CHANGELOG entries without changing any file |
+| `task release` | Cut a release: bump the version, write `CHANGELOG.md`, commit, and tag |
+| `task release:publish` | Push the release commit and its tag to `origin` |
 
 Every task prints an `OK:` or `FAIL:` line. CI runs `task pre-commit` and `task build` on Ubuntu
 and macOS; the macOS job skips the license header hook because its runners have no docker.
@@ -128,6 +131,38 @@ Every Python file carries the license header that [.licenserc.yaml](.licenserc.y
 2. Create a feature branch off `main`.
 3. Make focused commits that pass `task pre-commit`.
 4. Open a pull request against `main` describing what changed, why, and how you verified it.
+
+Squash merges use the pull request title as the commit subject on `main`, so the title must be a
+[Conventional Commit](https://www.conventionalcommits.org/) subject such as
+`fix: Refuse a checkpoint without a generation marker`: releases read their version bump from it.
+
+## Releases
+
+Maintainers cut releases with [Commitizen](https://commitizen-tools.github.io/commitizen/), which
+follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and reads the bump from the
+commit subjects since the last `v*` tag: `feat` raises the minor version, `fix`, `perf`, and
+`refactor` the patch version, and a breaking change (`feat!:` or a `BREAKING CHANGE:` footer) the
+major version. While the version is `0.x`, `major_version_zero` turns a breaking change into a minor
+bump. A release whose commits drive no bump, such as dependency updates alone, still releases as a
+patch.
+
+```sh
+task release:dry      # preview the next version and its CHANGELOG entries
+task release          # bump, write CHANGELOG.md, commit, and create the annotated tag
+task release:publish  # push main and that one tag to origin
+```
+
+`task release` first checks that the tree is clean, on `main`, in sync with `origin/main`, and has
+commits since the last tag. `cz bump` then writes the version into `pyproject.toml` and `uv.lock`,
+updates `CHANGELOG.md`, commits, and tags. Publishing is a separate task so the inferred version can
+be inspected while it is still local; override it with `task release -- --increment minor`.
+`task release:publish` checks again that the tag points at `HEAD` and that `origin` does not have
+it yet, shows the commits it will push, asks for confirmation on a terminal, and pushes `main` and
+that single tag.
+
+The `version` in `pyproject.toml` is owned by `cz bump`; do not edit it by hand. Commitizen bumps
+from the tag that matches it, and `task release:require-tag` prints the command that seeds the tag
+when it is missing.
 
 ## Maintainers
 
