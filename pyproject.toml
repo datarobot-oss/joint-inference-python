@@ -103,6 +103,14 @@ version_provider = "pep621"
 version_scheme = "semver"
 tag_format = "v$version"
 major_version_zero = true
+update_changelog_on_bump = true
+changelog_file = "CHANGELOG.md"
+changelog_incremental = true
+# uv.lock records the project's own version, so it must follow every bump.
+pre_bump_hooks = [
+    "uv lock",
+    "git add uv.lock",
+]
 
 [tool.ty]
 environment.python-version = "3.13"
