@@ -106,6 +106,45 @@ The [Pulumi program](deploy/stack.py) needs neither docker nor an image registry
 
 Pulumi records what it created in a state backend, by default the local `~/.pulumi`; set `PULUMI_BACKEND_URL` to share state between machines. `JOINTFM_DEPLOY_STACK` names the stack, and each stack is one Workload.
 
+## Releases
+
+A release is a tagged version of this repository, not an upload. Cutting one adds a commit `bump: version <old> → <new>` to `main` that sets `version` in [pyproject.toml](pyproject.toml) and `uv.lock` and adds the new version's entries to `CHANGELOG.md`, and tags that commit `v<new>`. Nothing is published anywhere else: the package carries the `Private :: Do Not Upload` classifier, which PyPI refuses, no container image is pushed, and no workflow runs on a tag. Install a release from its tag, for example `uv add "jointfm-inference @ git+https://github.com/datarobot-oss/joint-inference-python@v<version>"`.
+
+### Version numbers
+
+[Commitizen](https://commitizen-tools.github.io/commitizen/) picks the next [Semantic Versioning](https://semver.org/spec/v2.0.0.html) number from the [Conventional Commit](https://www.conventionalcommits.org/) subjects on `main` since the last `v*` tag. Pull requests are squash-merged with their title as the commit subject, so the title decides the bump:
+
+| Commit | Bump |
+| --- | --- |
+| `feat:` | minor |
+| `fix:`, `perf:`, `refactor:` | patch |
+| breaking change: `feat!:`, `fix!:`, or a `BREAKING CHANGE:` footer | major, but minor while the version is `0.x` |
+| any other type (`docs:`, `build:`, `chore:`, `ci:`, `test:`), or not a Conventional Commit | none, and left out of `CHANGELOG.md` |
+
+A release whose commits drive no bump, such as dependency updates alone, goes out as a patch. `task release -- --increment minor` (or `major`, `patch`) overrides the inferred bump. `cz bump` owns the `version` in `pyproject.toml`; never edit it by hand.
+
+### Cutting a release
+
+Maintainers release from an up-to-date `main` checkout set up with `task setup`, with docker running:
+
+```sh
+task release:dry      # preview the next version and its CHANGELOG entries; changes nothing
+task release          # commit the bump and tag it, locally
+task release:publish  # push main and the new tag to origin
+```
+
+`task release` first checks that the tag of the current version exists, the working tree is clean, the branch is `main`, `main` matches `origin/main` after a fetch, and `main` has commits since that tag; any failure stops it before a file changes. It then runs `cz bump`, which writes the new `CHANGELOG.md` section, sets the version in `pyproject.toml`, runs `uv lock` so `uv.lock` records it, commits the three files, and creates the tag. That commit runs the commit hooks like any other, including the license header hook (hence docker) and the full test suite with its coverage floor. When a hook fails there is no commit and no tag, but the three files stay changed and staged; discard those changes before trying again.
+
+Nothing has left the machine at this point. Inspect the commit with `git show`; to cut a different version, drop the tag and the commit (`git tag -d v<new>`, then `git reset --hard origin/main`) and run `task release` again.
+
+`task release:publish` checks again that the tree is clean on `main`, that the tag of the version in `pyproject.toml` points at `HEAD`, and that `origin` does not have that tag yet, since a published tag never moves. It lists the commits it will push, asks for confirmation when run from a terminal, and pushes `main` first, then that one tag. The push to `main` starts the workflows every push to `main` runs; the tag starts none.
+
+- The release commit goes to `main` directly, while the repository's rules require pull-request review and passing status checks for `main`. GitHub accepts the push only from an account that may bypass those rules.
+- When a pull request merged into `main` after `task release`, the push of `main` is rejected as not a fast-forward and nothing is pushed. Drop the tag and the commit as above and cut the release again; rebasing would move the release commit away from its tag, which `task release:publish` refuses.
+- When `main` was pushed but the tag push failed, run `task release:publish` again: the checks still pass and only the tag is left to push.
+
+Commitizen bumps from the tag that matches the version in `pyproject.toml`. Before the first release that tag does not exist yet, so every release task stops and prints the `git tag` command that seeds it on the commit that set the version.
+
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup, every `task` target, the package layout, the checkpoint format, and the checks that keep this public repository free of private material. Rules for contributors and coding agents are in [AGENTS.md](AGENTS.md).

@@ -138,31 +138,8 @@ Squash merges use the pull request title as the commit subject on `main`, so the
 
 ## Releases
 
-Maintainers cut releases with [Commitizen](https://commitizen-tools.github.io/commitizen/), which
-follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and reads the bump from the
-commit subjects since the last `v*` tag: `feat` raises the minor version, `fix`, `perf`, and
-`refactor` the patch version, and a breaking change (`feat!:` or a `BREAKING CHANGE:` footer) the
-major version. While the version is `0.x`, `major_version_zero` turns a breaking change into a minor
-bump. A release whose commits drive no bump, such as dependency updates alone, still releases as a
-patch.
-
-```sh
-task release:dry      # preview the next version and its CHANGELOG entries
-task release          # bump, write CHANGELOG.md, commit, and create the annotated tag
-task release:publish  # push main and that one tag to origin
-```
-
-`task release` first checks that the tree is clean, on `main`, in sync with `origin/main`, and has
-commits since the last tag. `cz bump` then writes the version into `pyproject.toml` and `uv.lock`,
-updates `CHANGELOG.md`, commits, and tags. Publishing is a separate task so the inferred version can
-be inspected while it is still local; override it with `task release -- --increment minor`.
-`task release:publish` checks again that the tag points at `HEAD` and that `origin` does not have
-it yet, shows the commits it will push, asks for confirmation on a terminal, and pushes `main` and
-that single tag.
-
-The `version` in `pyproject.toml` is owned by `cz bump`; do not edit it by hand. Commitizen bumps
-from the tag that matches it, and `task release:require-tag` prints the command that seeds the tag
-when it is missing.
+Maintainers cut releases with `task release` and publish them with `task release:publish`; the
+[Releases section of the README](README.md#releases) describes the process.
 
 ## Maintainers
 
