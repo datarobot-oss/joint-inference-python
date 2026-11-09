@@ -55,7 +55,7 @@ from tests.support.service import (
     mount_service,
 )
 
-# Large enough for Monte Carlo quantiles to sit close to their closed form.
+# Above every sample count a test here asks for.
 _MAX_SAMPLE_COUNT = 4096
 _STUDENT_T_DF = 5.0
 
@@ -305,11 +305,10 @@ def test_service_rejects_time_column_declared_in_columns() -> None:
 
 
 def test_service_returns_quantiles_for_requested_columns() -> None:
-    """Monte Carlo quantiles sit on the emitted Student-t marginal's closed form."""
+    """Quantiles are the emitted Student-t marginal's closed form, whatever the seed."""
     service = _service(_FixedParameterJointFM(scale=1.0))
     request = _request_payload()
     request["return_mode"] = "quantiles"
-    request["n_samples"] = _MAX_SAMPLE_COUNT
     request["quantiles"] = [0.1, 0.9]
 
     response = service.predict(request)
@@ -323,7 +322,9 @@ def test_service_returns_quantiles_for_requested_columns() -> None:
             location + stats.t.ppf(entry["quantile"], _STUDENT_T_DF)
             for location in (200.0, 201.0)
         ]
-        assert [row[0] for row in entry["values"]] == pytest.approx(expected, abs=0.15)
+        assert [row[0] for row in entry["values"]] == pytest.approx(expected, abs=1e-4)
+    reseeded = service.predict({**request, "seed": 8})
+    assert reseeded["outputs"]["quantiles"] == quantiles
 
 
 def test_service_returns_log_prob_for_query_rows() -> None:

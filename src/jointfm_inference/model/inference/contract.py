@@ -134,7 +134,9 @@ class InferenceDistributionResult(Protocol):
 
         ``mean`` may be a Monte Carlo estimate; ``n_samples`` then controls
         the precision/latency trade-off (``None`` uses the backend default)
-        and ``rng`` makes it reproducible.
+        and ``rng`` makes it reproducible. A backend whose mean is exact
+        takes both controls and leaves them unused, as the infinite-sample
+        limit of the estimate needs neither.
         """
         ...
 
@@ -161,7 +163,11 @@ class InferenceDistributionResult(Protocol):
         n_samples: int,
         rng: torch.Generator | None = None,
     ) -> Tensor:
-        """Return ``(Q, B, H, D)`` marginal quantiles for probabilities ``q``."""
+        """Return ``(Q, B, H, D)`` marginal quantiles for probabilities ``q``.
+
+        ``n_samples`` and ``rng`` control a Monte Carlo estimate, as for
+        ``mean``; a backend whose quantiles are exact leaves them unused.
+        """
         ...
 
     def log_prob(self, values: Tensor) -> Tensor:
@@ -352,10 +358,12 @@ class JointFM1DistributionResult:
         n_samples: int | None = None,
         rng: torch.Generator | None = None,
     ) -> Tensor:
-        """Return the ``(B, H, D)`` Monte Carlo predictive mean."""
-        if n_samples is None:
-            return self._adapter.mean(rng=rng)
-        return self._adapter.mean(n_samples=n_samples, rng=rng)
+        """Return the exact ``(B, H, D)`` predictive mean.
+
+        The mean draws nothing, so the sampling controls are inert.
+        """
+        del n_samples, rng
+        return self._adapter.mean()
 
     def samples(
         self,
@@ -380,8 +388,12 @@ class JointFM1DistributionResult:
         n_samples: int,
         rng: torch.Generator | None = None,
     ) -> Tensor:
-        """Return ``(Q, B, H, D)`` sampling-based marginal quantiles."""
-        return self._adapter.quantiles(q=q, n_samples=n_samples, rng=rng)
+        """Return exact ``(Q, B, H, D)`` marginal quantiles.
+
+        The quantiles draw nothing, so the sampling controls are inert.
+        """
+        del n_samples, rng
+        return self._adapter.quantiles(q)
 
     def log_prob(self, values: Tensor) -> Tensor:
         """Score ``(B, H, D)`` observed values, returning ``(B, H)``."""

@@ -19,14 +19,15 @@ over a ``(time, column)`` token grid in which every forecast horizon of every
 column is a query row on the time axis, a set-transformer pooling of each
 horizon's column tokens, and a Student-t mixture head with a low-rank
 covariance per component, decoding every queried horizon in one pass.
-``JointFMConfig`` carries only the sizes that vary between checkpoints of that
-architecture; a checkpoint stores it under ``cfg`` as a flat mapping.
+``JointFMConfig`` carries the sizes that vary between checkpoints of that
+architecture and whether the checkpoint predicts with its sign-symmetric
+mixture; a checkpoint stores it under ``cfg`` as a flat mapping.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import MISSING, dataclass, fields
 from typing import Any, Optional
 
 
@@ -64,6 +65,13 @@ class JointFMConfig:
         pooling_nhead: Attention heads of the set-transformer pooling.
         pooling_seeds: Learned seed vectors of the set-transformer pooling.
         pooling_layers: Layers of the set-transformer pooling.
+        sign_symmetric_prediction: Predict with the sign-symmetric mixture:
+            the equal-weight mixture of the forecast for the history and the
+            negated forecast for the negated history, which negating every
+            column of a request negates exactly
+            (:mod:`jointfm_inference.model.jointfm_1.sign_symmetry`). Off
+            predicts with the head's mixture as emitted; a ``cfg`` without
+            the key is off.
     """
 
     num_layers: int
@@ -91,9 +99,15 @@ class JointFMConfig:
     pooling_nhead: int
     pooling_seeds: int
     pooling_layers: int
+    sign_symmetric_prediction: bool = False
 
     def __post_init__(self) -> None:
-        """Refuse sizes the network cannot be built with."""
+        """Refuse sizes the network cannot be built with, and a non-bool switch."""
+        if not isinstance(self.sign_symmetric_prediction, bool):
+            raise TypeError(
+                "sign_symmetric_prediction must be a bool, got "
+                f"{type(self.sign_symmetric_prediction).__name__}"
+            )
         positive = (
             "num_layers",
             "column_capacity",
@@ -153,20 +167,25 @@ class JointFMConfig:
     def from_mapping(cls, raw: Mapping[str, Any]) -> "JointFMConfig":
         """Build the config from a checkpoint's ``cfg`` mapping.
 
+        A field with a default (``sign_symmetric_prediction``) may be absent
+        and then takes it.
+
         Raises:
-            ValueError: when a field is missing or the mapping carries a key
-                that is not a field, so a checkpoint of another architecture
-                fails here instead of loading into the wrong network.
+            ValueError: when a field without a default is missing or the
+                mapping carries a key that is not a field, so a checkpoint of
+                another architecture fails here instead of loading into the
+                wrong network.
         """
         names = [field.name for field in fields(cls)]
-        missing = sorted(set(names) - set(raw))
+        required = [field.name for field in fields(cls) if field.default is MISSING]
+        missing = sorted(set(required) - set(raw))
         unknown = sorted(set(raw) - set(names))
         if missing or unknown:
             raise ValueError(
                 "checkpoint 'cfg' does not describe a JointFM 1 network: "
                 f"missing {missing}, unknown {unknown}"
             )
-        return cls(**{name: raw[name] for name in names})
+        return cls(**{name: raw[name] for name in names if name in raw})
 
 
 __all__ = ["JointFMConfig"]

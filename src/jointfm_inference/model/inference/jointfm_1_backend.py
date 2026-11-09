@@ -33,6 +33,7 @@ from jointfm_inference.model.checkpoint import JOINTFM_1_GENERATION
 from jointfm_inference.model.jointfm_1.config import JointFMConfig
 from jointfm_inference.model.jointfm_1.head import StudentTHead
 from jointfm_inference.model.jointfm_1.model import JointFM
+from jointfm_inference.model.jointfm_1.sign_symmetry import symmetric_mixture
 from jointfm_inference.model.precision import autocast_context, upcast_reduced_precision
 
 from jointfm_inference.data.types import METADATA_COLUMN_NAMES_KEY, CanonicalSample
@@ -154,14 +155,32 @@ class JointFM1InferenceBackend:
 
         ``past`` is a ``(B, T, D)`` batch of history values, ``horizons`` the
         ``(H,)`` horizon indices to emit, and ``past_time_indices`` the
-        optional ``(T,)`` grid positions of the history rows. The forward runs
-        at the session's precision; the adapter receives float32 parameters.
+        optional ``(T,)`` grid positions of the history rows. When the
+        checkpoint's ``cfg`` turns ``sign_symmetric_prediction`` on, the
+        network runs a second time on ``-past`` and the distribution is the
+        :func:`symmetric_mixture` of both forwards, with twice the head's
+        components. The forwards run at the session's precision; the mixture
+        is formed and the adapter receives its parameters in float32.
         """
+        params = self._forward(past, horizons, past_time_indices)
+        if self._model.cfg.sign_symmetric_prediction:
+            params = symmetric_mixture(
+                params, self._forward(-past, horizons, past_time_indices)
+            )
+        return PredictorAdapter(self._head, params)
+
+    def _forward(
+        self,
+        past: torch.Tensor,
+        horizons: torch.Tensor,
+        past_time_indices: torch.Tensor | None,
+    ) -> dict[str, torch.Tensor]:
+        """Run one forward at the session's precision and return float32 outputs."""
         with torch.no_grad(), autocast_context(self._device.type, self._autocast_dtype):
             raw_params = self._model(
                 past, horizons, past_time_indices=past_time_indices
             )
-        return PredictorAdapter(self._head, upcast_reduced_precision(raw_params))
+        return upcast_reduced_precision(raw_params)
 
 
 def _require_input_scale(sample: CanonicalSample) -> None:

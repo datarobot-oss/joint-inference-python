@@ -165,13 +165,19 @@ def test_predict_returns_the_decoded_response_bytes() -> None:
     assert list(decoded) == sorted(decoded)
 
 
-@pytest.mark.parametrize("return_mode", ["mean", "samples"])
+@pytest.mark.parametrize(
+    "overrides",
+    [{"return_mode": "samples"}, {"return_mode": "quantiles", "quantiles": [0.9]}],
+)
 def test_a_forecast_that_overflows_fails_instead_of_answering_null(
-    return_mode: str,
+    overrides: dict[str, Any],
 ) -> None:
-    """A response never carries ``null``: a non-finite forecast is a server error."""
+    """A response never carries ``null``: a non-finite forecast is a server error.
+
+    Draws overflow, and so does an exact quantile beyond the largest float32.
+    """
     service = _service(_OverflowingJointFM())
-    request = {**_samples_payload(), "return_mode": return_mode}
+    request = {**_samples_payload(), **overrides}
 
     with pytest.raises(RuntimeError, match="must be finite"):
         service.predict_response_bytes(request)

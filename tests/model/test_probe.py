@@ -150,6 +150,7 @@ def test_probe_service_exercises_advertised_return_modes() -> None:
     quantile_payload = calls[3][2]
     assert quantile_payload is not None
     assert quantile_payload["quantiles"] == list(probe.DEFAULT_QUANTILES)
+    assert "n_samples" not in quantile_payload
     log_prob_payload = calls[4][2]
     assert log_prob_payload is not None
     assert log_prob_payload["requested_columns"] == [

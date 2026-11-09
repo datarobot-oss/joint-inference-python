@@ -93,10 +93,9 @@ def test_point_forecast_and_quantiles_follow_the_mixture() -> None:
     weights = torch.softmax(params["logits"], dim=-1)
     expected = (weights.unsqueeze(-1) * params["means"]).sum(dim=-2)
 
-    mean = adapter.mean(n_samples=20_000, rng=torch.Generator().manual_seed(2))
-    torch.testing.assert_close(mean, expected, atol=0.05, rtol=0.0)
+    torch.testing.assert_close(adapter.mean(), expected)
 
-    quantiles = adapter.quantiles([0.1, 0.9], n_samples=64)
+    quantiles = adapter.quantiles([0.1, 0.9])
     assert quantiles.shape == (2, B, H, D)
     assert (quantiles[0] < quantiles[1]).all()
 

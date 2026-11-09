@@ -14,7 +14,7 @@
 
 """Predictor adapter over one Student-t mixture parameter mapping.
 
-Provides Monte Carlo means and quantiles, sampling with rejection bounds,
+Provides exact means and quantiles, sampling with rejection bounds,
 log-densities, and exact conditioning on known columns.
 """
 
@@ -34,8 +34,6 @@ from ._bounds import (
 )
 from .conditioning import MixtureCovariance, condition_student_t_mixture
 
-DEFAULT_MEAN_SAMPLES = 500
-DEFAULT_QUANTILE_SAMPLES = 2000
 DEFAULT_SAMPLE_COUNT = 100
 DEFAULT_MAX_REDRAWS = 100
 
@@ -68,18 +66,9 @@ class PredictorAdapter:
             batch_times_samples // n_samples, n_samples, horizon_count, dim
         )
 
-    def mean(
-        self,
-        *,
-        n_samples: int = DEFAULT_MEAN_SAMPLES,
-        rng: torch.Generator | None = None,
-    ) -> torch.Tensor:
-        """Return the ``(B, H, D)`` Monte Carlo mean.
-
-        The mean shares one sampler with ``quantiles`` and ``sample``;
-        ``n_samples`` trades precision for latency.
-        """
-        return self.head.mean(self.params, num_samples=n_samples, rng=rng)
+    def mean(self) -> torch.Tensor:
+        """Return the exact ``(B, H, D)`` mean, the same for every seed."""
+        return self.head.mean(self.params)
 
     def log_prob(self, values: torch.Tensor) -> torch.Tensor:
         """Return the ``(B, H)`` log-density of one ``(B, H, D)`` continuation."""
@@ -153,14 +142,9 @@ class PredictorAdapter:
             raise RuntimeError(error_msg)
         return samples
 
-    def quantiles(
-        self,
-        q: Sequence[float],
-        n_samples: int = DEFAULT_QUANTILE_SAMPLES,
-        rng: Optional[torch.Generator] = None,
-    ) -> torch.Tensor:
-        """Return Monte Carlo marginal quantiles ``(len(q), B, H, D)``."""
-        return self.head.quantiles(self.params, q, num_samples=n_samples, rng=rng)
+    def quantiles(self, q: Sequence[float]) -> torch.Tensor:
+        """Return exact marginal quantiles ``(len(q), B, H, D)``, the same for every seed."""
+        return self.head.quantiles(self.params, q)
 
     def condition(self, values: torch.Tensor, mask: torch.Tensor) -> "PredictorAdapter":
         """Return the exact conditional over the columns ``mask`` leaves unknown.

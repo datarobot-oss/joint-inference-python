@@ -143,7 +143,7 @@ def build_probe_payload(
     if return_mode == "log_prob":
         payload["requested_columns"] = list(DEFAULT_LOG_PROB_REQUESTED_COLUMNS)
         payload["query_rows"] = [dict(row) for row in DEFAULT_QUERY_ROWS]
-    if return_mode in {"samples", "quantiles"}:
+    if return_mode == "samples":
         payload["n_samples"] = DEFAULT_SAMPLE_COUNT
     if return_mode == "quantiles":
         payload["quantiles"] = list(DEFAULT_QUANTILES)

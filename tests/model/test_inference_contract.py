@@ -39,7 +39,6 @@ from jointfm_inference.model.inference import (
     condition_at_position,
     normalize_head_name,
 )
-from jointfm_inference.model.inference.adapter import DEFAULT_MEAN_SAMPLES
 from jointfm_inference.model.inference.jointfm_1_backend import (
     JOINTFM_1_SERVING_BACKEND,
     JointFM1InferenceBackend,
@@ -162,18 +161,15 @@ class TestJointFM1DistributionResult:
             JointFM1DistributionResult(_student_t_adapter(), active_column_count=0)
 
     @pytest.mark.parametrize("n_samples", [None, 50])
-    def test_mean_matches_direct_adapter_call(self, n_samples: int | None) -> None:
+    def test_mean_is_the_exact_adapter_mean(self, n_samples: int | None) -> None:
+        """The protocol's sampling controls leave an exact mean unchanged."""
         adapter = _student_t_adapter()
         result = JointFM1DistributionResult(adapter, active_column_count=3)
         via_contract = result.mean(
             n_samples=n_samples, rng=torch.Generator().manual_seed(11)
         )
-        direct = adapter.mean(
-            n_samples=DEFAULT_MEAN_SAMPLES if n_samples is None else n_samples,
-            rng=torch.Generator().manual_seed(11),
-        )
         assert via_contract.shape == (1, 2, 3)
-        assert torch.equal(via_contract, direct)
+        assert torch.equal(via_contract, adapter.mean())
 
     def test_samples_match_direct_adapter_call(self) -> None:
         adapter = _student_t_adapter()
@@ -193,18 +189,16 @@ class TestJointFM1DistributionResult:
         assert via_contract.shape == (1, 50, 2, 3)
         assert torch.equal(via_contract, direct)
 
-    def test_quantiles_match_direct_adapter_call(self) -> None:
+    def test_quantiles_are_the_exact_adapter_quantiles(self) -> None:
+        """Two seeds and two sample counts give the same quantiles."""
         adapter = _student_t_adapter()
         result = JointFM1DistributionResult(adapter, active_column_count=3)
         q = [0.1, 0.5, 0.9]
-        via_contract = result.quantiles(
-            q, n_samples=200, rng=torch.Generator().manual_seed(3)
-        )
-        direct = adapter.quantiles(
-            q=q, n_samples=200, rng=torch.Generator().manual_seed(3)
-        )
-        assert via_contract.shape == (3, 1, 2, 3)
-        assert torch.equal(via_contract, direct)
+        first = result.quantiles(q, n_samples=200, rng=torch.Generator().manual_seed(3))
+        second = result.quantiles(q, n_samples=7, rng=torch.Generator().manual_seed(4))
+        assert first.shape == (3, 1, 2, 3)
+        assert torch.equal(first, adapter.quantiles(q))
+        assert torch.equal(first, second)
 
     def test_log_prob_matches_direct_adapter_call(self) -> None:
         adapter = _student_t_adapter()

@@ -36,7 +36,7 @@ import math
 
 import pytest
 import torch
-from scipy.special import stdtr
+from scipy.special import stdtr, stdtrit
 
 from jointfm_inference.model.inference import PredictorAdapter
 from jointfm_inference.model.inference.conditional_query import (
@@ -378,29 +378,39 @@ def test_samples_respect_every_condition_and_carry_the_pinned_value() -> None:
     assert read_out.read_out_columns == (2, 3)
 
 
-def test_quantiles_carry_each_condition_and_center_on_the_conditional_location() -> (
-    None
-):
-    """A symmetric conditional's median is its location.
+def test_quantiles_carry_each_condition_and_match_the_closed_form_conditional() -> None:
+    """An equality conditional's quantiles are those of its closed-form Student-t.
 
-    Conditioned columns keep what their condition said about them.
+    Pinning one unit-scale column at squared distance ``d`` from its location
+    leaves a Student-t at the Schur-complement location, with one more degree
+    of freedom and squared scale ``(df + d) / (df + 1) * (1 - correlation**2)``
+    (Ding, 2016, arXiv:1604.00561). Every level is checked, because the median
+    alone would not notice a wrong scale. Conditioned columns keep what their
+    condition said about them.
     """
-    # The read-out's own quantile draws come from the global generator.
-    torch.manual_seed(0)
     correlation, pinned = 0.6, 1.75
+    levels = [0.05, 0.25, 0.5, 0.75, 0.95]
     read_out = condition_at_position(
         _single_component(correlation),
         _pin_first(pinned),
-        n_samples=4000,
+        n_samples=16,
         column_count=2,
     )
 
-    quantiles = read_out.quantiles([0.25, 0.5, 0.75])
+    quantiles = read_out.quantiles(levels)
 
-    assert tuple(quantiles.shape) == (3, 1, 1, 2)
-    torch.testing.assert_close(quantiles[..., 0], torch.full((3, 1, 1), pinned))
+    assert tuple(quantiles.shape) == (len(levels), 1, 1, 2)
+    torch.testing.assert_close(
+        quantiles[..., 0], torch.full((len(levels), 1, 1), pinned)
+    )
+    distance = (pinned - _LOCATION[0]) ** 2
     location = _LOCATION[1] + correlation * (pinned - _LOCATION[0])
-    assert float(quantiles[1, 0, 0, 1]) == pytest.approx(location, abs=ORACLE_ATOL)
+    scale = math.sqrt((_DF + distance) / (_DF + 1.0) * (1.0 - correlation**2))
+    for index, level in enumerate(levels):
+        expected = location + scale * float(stdtrit(_DF + 1.0, level))
+        assert float(quantiles[index, 0, 0, 1]) == pytest.approx(
+            expected, abs=EXACT_ATOL
+        )
 
     bounded = condition_at_position(
         _correlated_mixture(),

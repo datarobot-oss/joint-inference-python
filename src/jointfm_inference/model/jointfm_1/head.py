@@ -24,6 +24,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from jointfm_inference.model.jointfm_1.marginals import (
+    mixture_mean,
+    mixture_quantiles,
+)
 from jointfm_inference.model.jointfm_1.readouts import (
     MEAN_OUTPUT,
     RAW_DIAG_OUTPUT,
@@ -300,37 +304,22 @@ class StudentTHead(nn.Module):
             .reshape(B * num_samples, H, D)
         )
 
-    def _samples_by_batch(self, samples: Tensor, num_samples: int) -> Tensor:
-        """Reshape ``(B * num_samples, H, D)`` draws to ``(B, num_samples, H, D)``."""
-        total, horizon_count, dim = samples.shape
-        return samples.view(total // num_samples, num_samples, horizon_count, dim)
+    def mean(self, params: Dict[str, Tensor]) -> Tensor:
+        """Return the exact ``(B, H, D)`` mean: the mixture-weighted locations.
 
-    def mean(
-        self,
-        params: Dict[str, Tensor],
-        num_samples: int = 500,
-        rng: Optional[torch.Generator] = None,
-    ) -> Tensor:
-        """Return the Monte Carlo mean ``(B, H, D)`` of ``num_samples`` draws.
-
-        Sampling keeps the mean consistent with ``quantiles`` and ``sample``.
+        It draws nothing, so it is the same for every seed
+        (:func:`~jointfm_inference.model.jointfm_1.marginals.mixture_mean`).
         """
-        samples = self.sample(params, num_samples=num_samples, rng=rng)
-        return self._samples_by_batch(samples, num_samples).mean(dim=1)
+        return mixture_mean(params)
 
-    def quantiles(
-        self,
-        params: Dict[str, Tensor],
-        q: Sequence[float],
-        num_samples: int = 1000,
-        rng: Optional[torch.Generator] = None,
-    ) -> Tensor:
-        """Return Monte Carlo marginal quantiles ``(len(q), B, H, D)``."""
-        samples = self._samples_by_batch(
-            self.sample(params, num_samples=num_samples, rng=rng), num_samples
-        )
-        q_t = torch.as_tensor(q, device=samples.device, dtype=samples.dtype)
-        return torch.quantile(samples, q_t, dim=1)
+    def quantiles(self, params: Dict[str, Tensor], q: Sequence[float]) -> Tensor:
+        """Return exact marginal quantiles ``(len(q), B, H, D)``.
+
+        Each is the root of its column's marginal mixture distribution
+        function, bisected to a stated tolerance without drawing
+        (:func:`~jointfm_inference.model.jointfm_1.marginals.mixture_quantiles`).
+        """
+        return mixture_quantiles(params, q)
 
 
 __all__ = [

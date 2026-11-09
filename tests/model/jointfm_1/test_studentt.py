@@ -178,22 +178,17 @@ def test_sample_refuses_non_finite_logits() -> None:
         _head(D=2, K=2, covariance_rank=1).sample(params, num_samples=2)
 
 
-def test_mean_and_quantiles_track_the_mixture_location() -> None:
+def test_mean_and_quantiles_are_the_mixture_summaries() -> None:
     params = _lowrank_mixture()
     head = _head(D=2, K=2, covariance_rank=1)
     weights = torch.softmax(params["logits"], dim=-1)
     expected = (weights.unsqueeze(-1) * params["means"]).sum(dim=-2)
 
-    mean = head.mean(params, num_samples=20_000, rng=torch.Generator().manual_seed(6))
+    mean = head.mean(params)
     assert mean.shape == (1, 1, 2)
-    torch.testing.assert_close(mean, expected, atol=0.06, rtol=0.0)
+    torch.testing.assert_close(mean, expected)
 
-    quantiles = head.quantiles(
-        params,
-        q=[0.1, 0.5, 0.9],
-        num_samples=2000,
-        rng=torch.Generator().manual_seed(7),
-    )
+    quantiles = head.quantiles(params, q=[0.1, 0.5, 0.9])
     assert quantiles.shape == (3, 1, 1, 2)
     assert (quantiles[0] < quantiles[1]).all() and (quantiles[1] < quantiles[2]).all()
 
@@ -262,14 +257,8 @@ def test_quantiles_read_data_space_parameters_without_rescaling() -> None:
     }
     head = _head(D=1, K=2, covariance_rank=1)
 
-    mean = float(
-        head.mean(params, num_samples=4000, rng=torch.Generator().manual_seed(11))
-    )
-    median = float(
-        head.quantiles(
-            params, q=[0.5], num_samples=4000, rng=torch.Generator().manual_seed(7)
-        )
-    )
+    mean = float(head.mean(params))
+    median = float(head.quantiles(params, q=[0.5]))
 
-    assert abs(mean - center) < 10.0
-    assert abs(median - center) < 10.0
+    assert mean == pytest.approx(center)
+    assert median == pytest.approx(center)

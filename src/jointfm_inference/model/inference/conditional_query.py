@@ -98,6 +98,12 @@ def _expand_mixture(
     }
 
 
+def _sample_quantiles(draws: Tensor, q: Sequence[float]) -> Tensor:
+    """Return ``(Q, B, ...)`` quantiles of ``(B, S, ...)`` draws over the draw axis."""
+    probabilities = torch.tensor(list(q), dtype=draws.dtype, device=draws.device)
+    return torch.quantile(draws, probabilities, dim=1)
+
+
 @dataclass(frozen=True)
 class ConditionRequest:
     """One conditioning request, resolved to column indices.
@@ -280,17 +286,15 @@ class ConditionalReadOut:
     def mean(self) -> Tensor:
         """Return the ``(B, 1, D)`` conditional mean.
 
-        Exact for the read-out columns: the pooled mixture's mean is a weighted
-        sum of component means, so no sampling enters, and with interval
-        conditions it is the average of exact conditional means over the draws.
-        A Student-t component's mean is its location only above one degree of
+        Exact for the read-out columns: the pooled mixture's mean is the head's
+        exact mixture mean, so no sampling enters, and with interval conditions
+        it is the average of exact conditional means over the draws. A
+        Student-t component's mean is its location only above one degree of
         freedom, which the head guarantees by flooring the emitted value;
         conditioning raises the degrees of freedom further, so the conditional
         mean is defined wherever the unconditioned one is.
         """
-        weights = F.softmax(self._pooled.params["logits"], dim=-1).unsqueeze(-1)
-        read_out_mean = (weights * self._pooled.params["means"]).sum(dim=-2)
-        full = self._full_width(read_out_mean)
+        full = self._full_width(self._pooled.mean())
         for column, value in zip(
             self._request.equality_columns, self._request.equality_values
         ):
@@ -321,22 +325,28 @@ class ConditionalReadOut:
         return full
 
     def quantiles(self, q: Sequence[float]) -> Tensor:
-        """Return ``(Q, B, 1, D)`` marginal quantiles of the conditional."""
-        read_out_quantiles = self._pooled.quantiles(
-            q=q, n_samples=self.sample_count, rng=self._rng
-        )
-        full = self._full_width(read_out_quantiles)
+        """Return ``(Q, B, 1, D)`` marginal quantiles of the conditional.
+
+        Without interval conditions the read-out columns' quantiles are exact,
+        the head's on the reduced mixture. With them the answer rests on the
+        interval draws, so every column's quantiles are order statistics of
+        ``sample_count`` draws: the interval columns' own truncated draws, and
+        draws from the pooled mixture for the read-out columns.
+        """
+        if self._interval_draws is None:
+            full = self._full_width(self._pooled.quantiles(q))
+        else:
+            read_out_draws = self._pooled.sample(
+                n_samples=self.sample_count, rng=self._rng
+            )
+            full = self._full_width(_sample_quantiles(read_out_draws, q))
+            drawn_quantiles = _sample_quantiles(self._interval_draws, q)
+            for position, column in enumerate(self._request.interval_columns):
+                full[..., column] = drawn_quantiles[..., position].unsqueeze(-1)
         for column, value in zip(
             self._request.equality_columns, self._request.equality_values
         ):
             full[..., column] = value
-        if self._interval_draws is not None:
-            probabilities = torch.tensor(
-                list(q), dtype=self._interval_draws.dtype, device=full.device
-            )
-            drawn_quantiles = torch.quantile(self._interval_draws, probabilities, dim=1)
-            for position, column in enumerate(self._request.interval_columns):
-                full[..., column] = drawn_quantiles[..., position].unsqueeze(-1)
         return full
 
     def log_prob(self, values: Tensor) -> Tensor:
