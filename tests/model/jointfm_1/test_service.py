@@ -754,3 +754,16 @@ def test_service_maps_history_conversion_errors_to_validation_error() -> None:
 
     assert error.code == "VALIDATION_ERROR"
     assert error.field == "history_rows"
+
+
+def test_service_refuses_a_column_without_history_scale() -> None:
+    """A flat history is refused by name instead of forecast as a point mass."""
+    request = _request_payload()
+    for row in request["history_rows"]:
+        row["known_feature"] = 0.0
+
+    error = _refusal(_service(), request)
+
+    assert error.code == "VALIDATION_ERROR"
+    assert error.field == "history_rows"
+    assert "column 'known_feature' has history spread 0" in error.message

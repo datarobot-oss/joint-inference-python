@@ -35,11 +35,18 @@ from jointfm_inference.model.jointfm_1.head import StudentTHead
 from jointfm_inference.model.jointfm_1.model import JointFM
 from jointfm_inference.model.precision import autocast_context, upcast_reduced_precision
 
+from jointfm_inference.data.types import METADATA_COLUMN_NAMES_KEY, CanonicalSample
+from jointfm_inference.model.jointfm_1.input_scale import (
+    history_scale_degeneracy,
+    scale_refusal_detail,
+)
+
 from .adapter import PredictorAdapter
 from .contract import (
     INFERENCE_RETURN_MODES,
     CanonicalInferenceRequest,
     InferenceDistributionResult,
+    InferenceRequestError,
     JointFM1DistributionResult,
     normalize_head_name,
 )
@@ -118,7 +125,13 @@ class JointFM1InferenceBackend:
     def execute(
         self, request: CanonicalInferenceRequest
     ) -> InferenceDistributionResult:
-        """Map the request onto the time grid and run one forward."""
+        """Map the request onto the time grid and run one forward.
+
+        Raises:
+            InferenceRequestError: When a column's history defines no scale
+                (``input_scale``); the message names the column.
+        """
+        _require_input_scale(request.sample)
         past, past_time_indices, horizons = grid_model_inputs(
             request.sample,
             time_index_support=self._time_index_support,
@@ -149,6 +162,25 @@ class JointFM1InferenceBackend:
                 past, horizons, past_time_indices=past_time_indices
             )
         return PredictorAdapter(self._head, upcast_reduced_precision(raw_params))
+
+
+def _require_input_scale(sample: CanonicalSample) -> None:
+    """Refuse, by name, a column whose history defines no scale.
+
+    The network refuses the same columns by index (``input_scale``); checking
+    here first lets the refusal name the column the caller declared.
+
+    Raises:
+        InferenceRequestError: For the first such column, on ``history_rows``.
+    """
+    history = sample.values[~sample.query_row_mask]
+    degenerate, spread, magnitude = history_scale_degeneracy(history)
+    if not bool(degenerate.any().item()):
+        return
+    index = int(torch.nonzero(degenerate).flatten()[0].item())
+    name = sample.metadata[METADATA_COLUMN_NAMES_KEY][index]
+    detail = scale_refusal_detail(float(spread[index]), float(magnitude[index]))
+    raise InferenceRequestError(f"column {name!r} {detail}", field="history_rows")
 
 
 class JointFM1ServingBackend:
