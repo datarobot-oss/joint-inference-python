@@ -1,3 +1,9 @@
+## v0.5.0 (2026-11-09)
+
+### Feat
+
+- Answer JointFM 1 means and quantiles exactly and add sign-symmetric prediction
+
 ## v0.4.0 (2026-11-09)
 
 ### Feat
