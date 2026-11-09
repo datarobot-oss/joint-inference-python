@@ -1,3 +1,11 @@
+## v0.4.0 (2026-11-09)
+
+### Feat
+
+- Reject flat columns (#29)
+- add guidelines for on/off settings in configuration
+- add stats task to show lines added and removed by commits over various timeframes
+
 ## v0.3.0 (2026-11-06)
 
 ### Feat
