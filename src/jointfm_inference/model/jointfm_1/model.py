@@ -30,10 +30,9 @@ from jointfm_inference.model.jointfm_1.head import (
     AUTO_STANDARDIZATION_SCALE_KEY,
     StudentTHead,
 )
+from jointfm_inference.model.jointfm_1.input_scale import input_scale
 from jointfm_inference.model.jointfm_1.pooling import _PMA
 
-# Floor of the history standard deviation used to standardize the input.
-MIN_STANDARDIZATION_SCALE = 1e-6
 PAST_TOKEN_TYPE = 0
 QUERY_TOKEN_TYPE = 1
 TOKEN_TYPES = 2
@@ -203,6 +202,10 @@ class JointFM(nn.Module):
             The head's parameters (means and covariances in data space) plus
             the standardization center and scale under
             ``AUTO_STANDARDIZATION_CENTER_KEY`` and ``..._SCALE_KEY``.
+
+        Raises:
+            ValueError: On malformed shapes, or a column whose history
+                defines no scale (``input_scale``).
         """
         batch_size, T_ctx, active_dim = past.shape
         if not 1 <= active_dim <= self.D:
@@ -215,10 +218,7 @@ class JointFM(nn.Module):
             raise ValueError("past_time_indices must have shape (T,)")
         past_time_indices = past_time_indices.to(past.device)
 
-        center = past[:, -1:, :]
-        scale = torch.clamp(
-            past.std(dim=1, keepdim=True, unbiased=False), min=MIN_STANDARDIZATION_SCALE
-        )
+        center, scale = input_scale(past)
         history = self._history_tokens((past - center) / scale, past_time_indices)
         horizon_count = horizons.shape[0]
         queries = self._query_tokens(horizons, past_time_indices[-1], active_dim)
