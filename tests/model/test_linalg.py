@@ -18,6 +18,7 @@ import pytest
 import torch
 
 from jointfm_inference.model.linalg import (
+    MAX_RELATIVE_JITTER,
     apply_selected_cholesky,
     cholesky_from_lowrank,
     compute_whitened_residuals,
@@ -129,7 +130,29 @@ def test_whitened_residuals_solve_the_triangular_system_with_and_without_folding
     torch.testing.assert_close(direct, expected[:, 0])
 
 
-def test_robust_cholesky_gives_up_on_a_matrix_no_jitter_can_repair() -> None:
-    sigma = torch.full((2, 2), float("nan"), dtype=torch.float64)
-    with pytest.raises(RuntimeError, match="jitter"):
+def test_robust_cholesky_refuses_a_nan_in_the_factor() -> None:
+    """No jitter repairs a NaN, so the retry must raise instead of searching."""
+    factor = torch.ones(3, 1)
+    factor[1, 0] = float("nan")
+    with pytest.raises(RuntimeError, match="non-finite"):
+        cholesky_from_lowrank(torch.ones(3), factor)
+
+
+def test_robust_cholesky_refuses_an_infinite_variance() -> None:
+    """An infinite variance has no correlation form, so no jitter can factorize it."""
+    with pytest.raises(RuntimeError, match="non-finite"):
+        cholesky_from_lowrank(torch.tensor([1.0, float("inf"), 1.0]), None)
+
+
+def test_robust_cholesky_gives_up_at_the_total_jitter_bound() -> None:
+    """A finite matrix that would need more than the bound raises, naming it.
+
+    The correlation form has an eigenvalue far below ``-MAX_RELATIVE_JITTER``,
+    so every attempt within the bound fails.
+    """
+    off_diagonal = 100 * MAX_RELATIVE_JITTER
+    sigma = torch.tensor(
+        [[1.0, off_diagonal], [off_diagonal, 1.0]], dtype=torch.float64
+    )
+    with pytest.raises(RuntimeError, match="total relative jitter"):
         robust_cholesky(sigma)

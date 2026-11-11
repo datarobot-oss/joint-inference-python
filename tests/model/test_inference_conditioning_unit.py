@@ -29,6 +29,7 @@ from jointfm_inference.model.inference.conditioning import (
     condition_student_t_mixture,
     conditioned_log_density,
 )
+from jointfm_inference.model.linalg import cholesky_from_lowrank
 from tests.support.inference import student_t_log_density, student_t_pair_mixture
 
 
@@ -331,6 +332,42 @@ def test_student_t_conditional_recovers_a_singular_known_block() -> None:
 
     for tensor in conditioned:
         assert torch.isfinite(tensor).all()
+
+
+def test_student_t_conditional_factors_a_nearly_determined_unknown_block() -> None:
+    """Condition a dense factor whose known columns nearly determine the rest.
+
+    A covariance of rank below the known count leaves the unknown block's
+    Schur complement at float32 rounding level. That rounding dominates the
+    complement's correlation form, so its factorization needs a relative
+    jitter beyond unit scale. The request must still be answered, and the
+    conditional variance must stay far below the marginal one.
+    """
+    dimension, rank, components = 128, 32, 16
+    known = dimension // 2
+    generator = torch.Generator().manual_seed(0)
+    factor = torch.randn(1, components, dimension, rank, generator=generator)
+    # One factorization per component: a batched one shares the largest jitter.
+    chol = torch.stack(
+        [
+            cholesky_from_lowrank(torch.full((dimension,), 1e-8), component)
+            for component in factor[0]
+        ]
+    ).unsqueeze(0)
+
+    _, _, new_chol, _ = condition_student_t_mixture(
+        torch.zeros(1, components),
+        torch.zeros(1, components, dimension),
+        MixtureCovariance(chol=chol),
+        torch.full((1, components), 6.0),
+        torch.zeros(1, dimension),
+        torch.arange(dimension) < known,
+    )
+
+    conditional_variance = new_chol.square().sum(dim=-1)
+    marginal_variance = factor[..., known:, :].square().sum(dim=-1)
+    assert torch.isfinite(new_chol).all()
+    assert (conditional_variance < 1e-3 * marginal_variance).all()
 
 
 def test_student_t_conditioning_rejects_non_positive_degrees_of_freedom() -> None:

@@ -23,10 +23,10 @@ from torch import Tensor
 
 logger = logging.getLogger(__name__)
 
-# The retry jitter grows geometrically and stops at the size of the unit
-# correlation diagonal, beyond which no matrix is repaired, only replaced.
+# The bound caps the total jitter only to guarantee termination: float32 rounding
+# in a nearly determined conditional covariance can need far beyond unit scale.
 JITTER_GROWTH = 1.1
-MAX_RELATIVE_JITTER = 1.0
+MAX_RELATIVE_JITTER = 1e5
 
 
 def _equilibration_scale(sigma: Tensor) -> Tensor:
@@ -65,9 +65,12 @@ def robust_cholesky(
     remedy for a badly scaled positive definite system, so the factorization it
     hands to LAPACK is the better conditioned one.
 
-    Tries to compute the factorization at ``initial_jitter``; if that fails,
-    iteratively adds more jitter until it succeeds. Performs computation in
-    float32 for stability if input is lower precision.
+    Tries the factorization at ``initial_jitter``; if that fails, adds a jitter
+    that grows by ``JITTER_GROWTH`` on every attempt until the factorization
+    succeeds or the total jitter added would pass ``MAX_RELATIVE_JITTER``. A
+    matrix holding a non-finite entry or variance is refused at the first
+    failure, because no jitter repairs it. Performs computation in float32 for
+    stability if input is lower precision.
 
     Args:
         sigma: Symmetric positive definite matrix (..., D, D).
@@ -80,8 +83,9 @@ def robust_cholesky(
         Lower triangular Cholesky factor L.
 
     Raises:
-        RuntimeError: when the factorization fails at every jitter up to
-            ``MAX_RELATIVE_JITTER``, as for a matrix holding NaN.
+        RuntimeError: when the matrix holds a non-finite entry or variance, or
+            when the factorization still fails at a total jitter of
+            ``MAX_RELATIVE_JITTER``.
     """
     # Ensure float32 for stability/support
     orig_dtype = sigma.dtype
@@ -99,30 +103,36 @@ def robust_cholesky(
     diag_ind = torch.arange(D, device=sigma.device)
 
     # 1. Initial stabilization
+    total_jitter = 0.0
     if initial_jitter > 0:
         correlation[..., diag_ind, diag_ind] += initial_jitter
+        total_jitter = initial_jitter
 
-    try:
-        L = torch.linalg.cholesky(correlation)
+    L, info = torch.linalg.cholesky_ex(correlation)
+    if not bool(info.any()):
         return (rows * L).to(dtype=orig_dtype)
-    except RuntimeError:
-        # 2. Retry loop
-        jitter = retry_start
-
-        while jitter <= MAX_RELATIVE_JITTER:
-            try:
-                correlation[..., diag_ind, diag_ind] += jitter
-                chol = torch.linalg.cholesky(correlation)
-                logger.debug(
-                    f"Could not compute Cholesky without jitter ({jitter:.1e})"
-                )
-                return (rows * chol).to(dtype=orig_dtype)
-            except RuntimeError:
-                jitter *= JITTER_GROWTH
+    if not bool(torch.isfinite(correlation).all()):
         raise RuntimeError(
-            "Cholesky factorization failed even at a relative jitter of "
-            f"{MAX_RELATIVE_JITTER}; the matrix is not a covariance"
+            "Cholesky factorization of a matrix with a non-finite entry or "
+            "variance; no jitter can repair it"
         )
+
+    # 2. Retry loop
+    jitter = retry_start
+    while total_jitter + jitter <= MAX_RELATIVE_JITTER:
+        correlation[..., diag_ind, diag_ind] += jitter
+        total_jitter += jitter
+        L, info = torch.linalg.cholesky_ex(correlation)
+        if not bool(info.any()):
+            logger.debug(
+                f"Cholesky needed a total relative jitter of {total_jitter:.1e}"
+            )
+            return (rows * L).to(dtype=orig_dtype)
+        jitter *= JITTER_GROWTH
+    raise RuntimeError(
+        "Cholesky factorization failed at a total relative jitter of "
+        f"{MAX_RELATIVE_JITTER:.0e}; the matrix is not a covariance"
+    )
 
 
 def cholesky_from_lowrank(
