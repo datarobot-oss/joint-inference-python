@@ -1,3 +1,13 @@
+## v0.6.0 (2026-11-12)
+
+### Feat
+
+- Add off-by-default per-stage timers to served requests and a profile command that reports median stage latency over column counts, sample counts, and return modes
+
+### Fix
+
+- Bound the total Cholesky jitter so nearly determined conditional covariances factorize, and refuse non-finite matrices without retrying
+
 ## v0.5.0 (2026-11-09)
 
 ### Feat
