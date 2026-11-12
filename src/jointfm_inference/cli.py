@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ``jointfm-inference`` command: ``serve`` and ``probe``.
+"""The ``jointfm-inference`` command: ``serve``, ``probe``, and ``profile``.
 
 ``serve`` takes no options: every setting is a ``JOINTFM_INFERENCE_*``
 environment variable (``jointfm_inference.model.service.config``), so a local
-process and a container read the same configuration file.
+process and a container read the same configuration file. ``profile`` loads
+the checkpoint from the same settings.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
-from jointfm_inference.model import probe
+from jointfm_inference.model import probe, profile
 from jointfm_inference.model.service import server
 
 SERVE_DESCRIPTION = (
@@ -45,7 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
     """Return the parser of the ``jointfm-inference`` command and its subcommands."""
     parser = argparse.ArgumentParser(
         prog="jointfm-inference",
-        description="Serve JointFM checkpoints and probe running services.",
+        description=(
+            "Serve JointFM checkpoints, probe running services, and profile "
+            "served-request latency."
+        ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
     serve_parser = commands.add_parser(
@@ -59,6 +63,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     probe.add_arguments(probe_parser)
     probe_parser.set_defaults(handler=probe.run)
+    profile_parser = commands.add_parser(
+        "profile",
+        help="Time each stage of served requests on the configured checkpoint",
+        description=profile.PROFILE_DESCRIPTION,
+    )
+    profile.add_arguments(profile_parser)
+    profile_parser.set_defaults(handler=profile.run)
     return parser
 
 

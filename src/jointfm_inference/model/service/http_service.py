@@ -32,6 +32,15 @@ from typing import Any, cast
 import orjson
 import torch
 
+from jointfm_inference.core.timing import (
+    ENCODE_STAGE,
+    EXECUTE_STAGE,
+    READOUT_STAGE,
+    REQUEST_STAGE,
+    SERIALIZE_STAGE,
+    CudaTimer,
+    Timer,
+)
 from jointfm_inference.data.adapters import DataFrameSchema, dataframe_to_canonical
 from jointfm_inference.data.time_index import build_canonical_query_sample
 from jointfm_inference.data.types import TIME_INDEX_MODES, TimeIndexModeLiteral
@@ -231,8 +240,10 @@ class JointFMHTTPService:
         # or forecast work so the cap also bounds the cheap validation path.
         # Acquisition blocks; the upstream gateway timeout decides how long a
         # queued request waits before giving up.
-        with self._concurrency_semaphore:
-            return encode_response(self._run_forecast_request(request_payload))
+        with self._concurrency_semaphore, Timer(REQUEST_STAGE):
+            response_payload = self._run_forecast_request(request_payload)
+            with Timer(ENCODE_STAGE):
+                return encode_response(response_payload)
 
     def _run_forecast_request(
         self, request_payload: Mapping[str, Any]
@@ -484,7 +495,8 @@ class JointFMHTTPService:
         # All request validation is done; the single stateless full-request
         # model forward runs last, on the backend fixed at construction.
         try:
-            result = self._session.execute(canonical_request)
+            with CudaTimer(EXECUTE_STAGE, self._device):
+                result = self._session.execute(canonical_request)
         except InferenceRequestError as error:
             raise ServiceError(
                 "VALIDATION_ERROR",
@@ -512,15 +524,16 @@ class JointFMHTTPService:
                 horizon_count=horizon_count,
             )
 
-        tensor = self._return_mode_tensor(
-            result,
-            return_mode=return_mode,
-            quantiles=quantiles,
-            column_specs=column_specs,
-            log_prob_values=log_prob_values,
-            sample_count=sample_count,
-            rng=rng,
-        )
+        with CudaTimer(READOUT_STAGE, self._device):
+            tensor = self._return_mode_tensor(
+                result,
+                return_mode=return_mode,
+                quantiles=quantiles,
+                column_specs=column_specs,
+                log_prob_values=log_prob_values,
+                sample_count=sample_count,
+                rng=rng,
+            )
         return {
             "schema_version": self._config.schema_version,
             "image_version": self._config.image_version,
@@ -621,68 +634,71 @@ class JointFMHTTPService:
                 covering its position.
         """
         covered = {request.horizon for request in condition_requests}
-        # The unconditioned answer draws before any conditional does, so an
-        # uncovered position carries exactly what the forecast mode answers
-        # under the same seed.
-        unconditioned = (
-            None
-            if len(covered) == horizon_count
-            else self._return_mode_tensor(
-                result,
-                return_mode=return_mode,
-                quantiles=quantiles,
-                column_specs=column_specs,
-                log_prob_values=log_prob_values,
-                sample_count=sample_count,
-                rng=rng,
-            )
-        )
-        minimum, maximum = _sampling_bound_tensors(column_specs, device=self._device)
-        # The capability gate at the top of the request path already refused
-        # any backend whose result cannot condition, so the narrowing is the
-        # gate's conclusion rather than a second guess at it.
-        conditional = cast(ConditionalDistributionResult, result)
-        read_outs: dict[int, ConditionalReadOut] = {}
-        for request in condition_requests:
-            try:
-                read_outs[request.horizon] = conditional.condition(
-                    request,
-                    n_samples=sample_count,
-                    rng=rng,
-                    min_value=minimum,
-                    max_value=maximum,
-                )
-            except ValueError as error:
-                raise ServiceError(
-                    ServiceErrorCode.VALIDATION_ERROR,
-                    str(error),
-                    status=HTTPStatus.BAD_REQUEST,
-                    field="conditions",
-                ) from error
-
-        horizon_axis = _HORIZON_AXIS[return_mode]
-        pieces: list[torch.Tensor] = []
-        for horizon in range(horizon_count):
-            if horizon in read_outs:
-                piece = _read_out_tensor(
-                    read_outs[horizon],
+        with CudaTimer(READOUT_STAGE, self._device):
+            # The unconditioned answer draws before any conditional does, so an
+            # uncovered position carries exactly what the forecast mode answers
+            # under the same seed.
+            unconditioned = (
+                None
+                if len(covered) == horizon_count
+                else self._return_mode_tensor(
+                    result,
                     return_mode=return_mode,
                     quantiles=quantiles,
+                    column_specs=column_specs,
                     log_prob_values=log_prob_values,
-                    horizon=horizon,
+                    sample_count=sample_count,
+                    rng=rng,
                 )
-            else:
-                if unconditioned is None:
-                    raise RuntimeError(
-                        f"position {horizon} is uncovered but no unconditioned "
-                        "answer was computed"
+            )
+            minimum, maximum = _sampling_bound_tensors(
+                column_specs, device=self._device
+            )
+            # The capability gate at the top of the request path already refused
+            # any backend whose result cannot condition, so the narrowing is the
+            # gate's conclusion rather than a second guess at it.
+            conditional = cast(ConditionalDistributionResult, result)
+            read_outs: dict[int, ConditionalReadOut] = {}
+            for request in condition_requests:
+                try:
+                    read_outs[request.horizon] = conditional.condition(
+                        request,
+                        n_samples=sample_count,
+                        rng=rng,
+                        min_value=minimum,
+                        max_value=maximum,
                     )
-                piece = unconditioned.narrow(horizon_axis, horizon, 1)
-            # Both answers cover every request column; keep the projection.
-            if return_mode != "log_prob":
-                piece = piece[..., list(requested_indices)]
-            pieces.append(piece)
-        tensor = torch.cat(pieces, dim=horizon_axis)
+                except ValueError as error:
+                    raise ServiceError(
+                        ServiceErrorCode.VALIDATION_ERROR,
+                        str(error),
+                        status=HTTPStatus.BAD_REQUEST,
+                        field="conditions",
+                    ) from error
+
+            horizon_axis = _HORIZON_AXIS[return_mode]
+            pieces: list[torch.Tensor] = []
+            for horizon in range(horizon_count):
+                if horizon in read_outs:
+                    piece = _read_out_tensor(
+                        read_outs[horizon],
+                        return_mode=return_mode,
+                        quantiles=quantiles,
+                        log_prob_values=log_prob_values,
+                        horizon=horizon,
+                    )
+                else:
+                    if unconditioned is None:
+                        raise RuntimeError(
+                            f"position {horizon} is uncovered but no unconditioned "
+                            "answer was computed"
+                        )
+                    piece = unconditioned.narrow(horizon_axis, horizon, 1)
+                # Both answers cover every request column; keep the projection.
+                if return_mode != "log_prob":
+                    piece = piece[..., list(requested_indices)]
+                pieces.append(piece)
+            tensor = torch.cat(pieces, dim=horizon_axis)
 
         return {
             "schema_version": self._config.schema_version,
@@ -767,32 +783,33 @@ def _outputs_payload(
     requested_indices: Sequence[int],
 ) -> dict[str, Any]:
     """Serialize one return mode's tensor into the response ``outputs`` block."""
-    outputs: dict[str, Any] = {
-        "query_times": _serialize_query_times(
-            query_times,
-            time_index_mode=time_index_mode,
-        ),
-        "requested_columns": list(requested_column_names),
-        "mean": None,
-        "samples": None,
-        "quantiles": None,
-        "log_prob": None,
-    }
-    if return_mode == "mean":
-        outputs["mean"] = _slice_forecast_tensor(tensor, requested_indices)
-    elif return_mode == "samples":
-        outputs["samples"] = _slice_sample_tensor(tensor, requested_indices)
-    elif return_mode == "quantiles":
-        outputs["quantiles"] = _slice_quantile_tensor(
-            tensor,
-            quantiles=quantiles,
-            requested_indices=requested_indices,
-        )
-    elif return_mode == "log_prob":
-        outputs["log_prob"] = _serialize_log_prob_tensor(tensor)
-    else:
-        raise RuntimeError(f"Unhandled return_mode {return_mode!r}")
-    return outputs
+    with Timer(SERIALIZE_STAGE):
+        outputs: dict[str, Any] = {
+            "query_times": _serialize_query_times(
+                query_times,
+                time_index_mode=time_index_mode,
+            ),
+            "requested_columns": list(requested_column_names),
+            "mean": None,
+            "samples": None,
+            "quantiles": None,
+            "log_prob": None,
+        }
+        if return_mode == "mean":
+            outputs["mean"] = _slice_forecast_tensor(tensor, requested_indices)
+        elif return_mode == "samples":
+            outputs["samples"] = _slice_sample_tensor(tensor, requested_indices)
+        elif return_mode == "quantiles":
+            outputs["quantiles"] = _slice_quantile_tensor(
+                tensor,
+                quantiles=quantiles,
+                requested_indices=requested_indices,
+            )
+        elif return_mode == "log_prob":
+            outputs["log_prob"] = _serialize_log_prob_tensor(tensor)
+        else:
+            raise RuntimeError(f"Unhandled return_mode {return_mode!r}")
+        return outputs
 
 
 def _summed_over_positions(values: Sequence[torch.Tensor | None]) -> float | None:

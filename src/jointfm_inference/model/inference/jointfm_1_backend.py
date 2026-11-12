@@ -29,6 +29,7 @@ from typing import Any, Final
 
 import torch
 
+from jointfm_inference.core.timing import FORWARD_STAGE, PREPARE_STAGE, CudaTimer
 from jointfm_inference.model.checkpoint import JOINTFM_1_GENERATION
 from jointfm_inference.model.jointfm_1.config import JointFMConfig
 from jointfm_inference.model.jointfm_1.head import StudentTHead
@@ -132,12 +133,13 @@ class JointFM1InferenceBackend:
             InferenceRequestError: When a column's history defines no scale
                 (``input_scale``); the message names the column.
         """
-        _require_input_scale(request.sample)
-        past, past_time_indices, horizons = grid_model_inputs(
-            request.sample,
-            time_index_support=self._time_index_support,
-            device=self._device,
-        )
+        with CudaTimer(PREPARE_STAGE, self._device):
+            _require_input_scale(request.sample)
+            past, past_time_indices, horizons = grid_model_inputs(
+                request.sample,
+                time_index_support=self._time_index_support,
+                device=self._device,
+            )
         predictor = self.predict_distribution(
             past, horizons, past_time_indices=past_time_indices
         )
@@ -176,11 +178,15 @@ class JointFM1InferenceBackend:
         past_time_indices: torch.Tensor | None,
     ) -> dict[str, torch.Tensor]:
         """Run one forward at the session's precision and return float32 outputs."""
-        with torch.no_grad(), autocast_context(self._device.type, self._autocast_dtype):
-            raw_params = self._model(
-                past, horizons, past_time_indices=past_time_indices
-            )
-        return upcast_reduced_precision(raw_params)
+        with CudaTimer(FORWARD_STAGE, self._device):
+            with (
+                torch.no_grad(),
+                autocast_context(self._device.type, self._autocast_dtype),
+            ):
+                raw_params = self._model(
+                    past, horizons, past_time_indices=past_time_indices
+                )
+            return upcast_reduced_precision(raw_params)
 
 
 def _require_input_scale(sample: CanonicalSample) -> None:

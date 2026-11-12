@@ -78,6 +78,8 @@ With the [DataRobot CLI](https://github.com/datarobot-oss/cli), `task start` (or
 
 `jointfm-inference probe --service-url URL` (repeatable) checks each service's health and requests every return mode it advertises; `task probe` probes the local service, and `task probe -- --service-url URL` any others.
 
+`jointfm-inference profile` shows where a request's time goes. It loads the checkpoint that the same settings configure into its own process, answers synthetic forecast requests one at a time without HTTP, over a grid of column counts (`--columns`), sample counts (`--samples`), and return modes (`--return-modes`), and prints a Markdown table of median milliseconds per stage: preparation, the network forward (encoder, then pooling and head), the read-out (for samples: Cholesky factorization, Gaussian draws, Gamma draws, and assembly), serialization, and JSON encoding, next to the end-to-end time with the stage timers off. `--output FILE` also writes every timing as JSON, and `task profile -- <options>` runs it from `.env`. Profile on a device no other process uses: a timer waits for all work on its device, so other work there lands in the stages. Library code turns the same timers on with `jointfm_inference.core.timing.set_enabled(True)`.
+
 ## Container
 
 `task docker:build` builds `jointfm-inference:<project version>` from [container/Dockerfile](container/Dockerfile). The image holds the package and its dependencies, never weights: its command is `jointfm-inference serve`, it listens on port 8080, and it expects the checkpoint at `/models/jointfm.pt` unless `JOINTFM_INFERENCE_CHECKPOINT_PATH` says otherwise. `/models` is a volume, so mount a directory there that holds the checkpoint, or one the container may download it into:

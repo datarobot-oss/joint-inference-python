@@ -413,6 +413,20 @@ tasks:
         exit 1
       fi
 
+  profile:
+    desc: "Time each stage of served requests on the checkpoint that .env configures, in this process and one request at a time; options go after -- (task profile -- --columns 1,10 --output profile.json)"
+    dotenv: [.env]
+    preconditions:
+      - sh: test -f .env
+        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
+    cmd: |
+      if uv run jointfm-inference profile {{.CLI_ARGS}}; then
+        echo "OK: every profiled request was answered"
+      else
+        echo "FAIL: profiling stopped before every case was timed"
+        exit 1
+      fi
+
   docker:build:
     desc: Build the container image jointfm-inference:<project version>; it holds no weights
     preconditions:

@@ -24,6 +24,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from jointfm_inference.core.timing import (
+    SAMPLE_ASSEMBLE_STAGE,
+    SAMPLE_CHOLESKY_STAGE,
+    SAMPLE_GAMMA_STAGE,
+    SAMPLE_GAUSSIAN_STAGE,
+    CudaTimer,
+)
 from jointfm_inference.model.jointfm_1.marginals import (
     mixture_mean,
     mixture_quantiles,
@@ -277,32 +284,36 @@ class StudentTHead(nn.Module):
                 "StudentTHead.sample produced invalid mixture probabilities"
             )
 
-        L_flat = _component_cholesky(params, B * H, K)
-        means_flat = means.reshape(B * H, K, D)
-        df_flat = df.reshape(B * H, K)
-        selector = _gumbel_argmax_one_hot(
-            logits.reshape(B * H, K), num_samples=num_samples, rng=rng
-        )
-        means_selected = torch.einsum("bnk,bkd->bnd", selector, means_flat)
-        df_selected = torch.einsum("bnk,bk->bn", selector, df_flat)
-        z = torch.randn(
-            B * H,
-            num_samples,
-            D,
-            device=logits.device,
-            generator=rng,
-            dtype=means.dtype,
-        )
-        z_mvn = apply_selected_cholesky(selector, L_flat, z)
+        with CudaTimer(SAMPLE_CHOLESKY_STAGE, logits.device):
+            L_flat = _component_cholesky(params, B * H, K)
+        with CudaTimer(SAMPLE_GAUSSIAN_STAGE, logits.device):
+            means_flat = means.reshape(B * H, K, D)
+            df_flat = df.reshape(B * H, K)
+            selector = _gumbel_argmax_one_hot(
+                logits.reshape(B * H, K), num_samples=num_samples, rng=rng
+            )
+            means_selected = torch.einsum("bnk,bkd->bnd", selector, means_flat)
+            df_selected = torch.einsum("bnk,bk->bn", selector, df_flat)
+            z = torch.randn(
+                B * H,
+                num_samples,
+                D,
+                device=logits.device,
+                generator=rng,
+                dtype=means.dtype,
+            )
+            z_mvn = apply_selected_cholesky(selector, L_flat, z)
         # A Student-t draw is a Gaussian draw scaled by sqrt(df / w), w ~ Chi2(df).
-        gamma_samples = torch._standard_gamma(df_selected / 2.0, generator=rng)
-        w = torch.clamp(2.0 * gamma_samples, min=MIN_CHI2_DRAW)
-        samples = means_selected + z_mvn * torch.sqrt(df_selected / w).unsqueeze(-1)
-        return (
-            samples.reshape(B, H, num_samples, D)
-            .permute(0, 2, 1, 3)
-            .reshape(B * num_samples, H, D)
-        )
+        with CudaTimer(SAMPLE_GAMMA_STAGE, logits.device):
+            gamma_samples = torch._standard_gamma(df_selected / 2.0, generator=rng)
+            w = torch.clamp(2.0 * gamma_samples, min=MIN_CHI2_DRAW)
+        with CudaTimer(SAMPLE_ASSEMBLE_STAGE, logits.device):
+            samples = means_selected + z_mvn * torch.sqrt(df_selected / w).unsqueeze(-1)
+            return (
+                samples.reshape(B, H, num_samples, D)
+                .permute(0, 2, 1, 3)
+                .reshape(B * num_samples, H, D)
+            )
 
     def mean(self, params: Dict[str, Tensor]) -> Tensor:
         """Return the exact ``(B, H, D)`` mean: the mixture-weighted locations.

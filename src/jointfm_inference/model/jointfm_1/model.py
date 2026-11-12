@@ -23,6 +23,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from jointfm_inference.core.timing import ENCODER_STAGE, POOL_HEAD_STAGE, CudaTimer
 from jointfm_inference.model.jointfm_1.config import JointFMConfig
 from jointfm_inference.model.jointfm_1.encoder import FactoredEncoder
 from jointfm_inference.model.jointfm_1.head import (
@@ -218,36 +219,40 @@ class JointFM(nn.Module):
             raise ValueError("past_time_indices must have shape (T,)")
         past_time_indices = past_time_indices.to(past.device)
 
-        center, scale = input_scale(past)
-        history = self._history_tokens((past - center) / scale, past_time_indices)
-        horizon_count = horizons.shape[0]
-        queries = self._query_tokens(horizons, past_time_indices[-1], active_dim)
-        encoded = self.encoder(
-            torch.cat([history, queries.expand(batch_size, -1, -1)], dim=1),
-            T_ctx=T_ctx,
-            D=active_dim,
-            query_rows=horizon_count,
-        )
-        column_tokens = encoded[:, history.shape[1] :, :].reshape(
-            batch_size, horizon_count, active_dim, self.cfg.d_model
-        )
-        params = self.head(
-            self._pool_horizons(column_tokens), column_tokens=column_tokens
-        )
+        with CudaTimer(ENCODER_STAGE, past.device):
+            center, scale = input_scale(past)
+            history = self._history_tokens((past - center) / scale, past_time_indices)
+            horizon_count = horizons.shape[0]
+            queries = self._query_tokens(horizons, past_time_indices[-1], active_dim)
+            encoded = self.encoder(
+                torch.cat([history, queries.expand(batch_size, -1, -1)], dim=1),
+                T_ctx=T_ctx,
+                D=active_dim,
+                query_rows=horizon_count,
+            )
 
-        out = dict(params)
-        out["means"] = (
-            center.unsqueeze(2) + scale.unsqueeze(2) * params["means"][..., :active_dim]
-        )
-        out["lowrank_diag"] = (
-            params["lowrank_diag"][..., :active_dim] * scale.unsqueeze(2) ** 2
-        )
-        out["lowrank_U"] = params["lowrank_U"][..., :active_dim, :] * scale.unsqueeze(
-            2
-        ).unsqueeze(-1)
-        out[AUTO_STANDARDIZATION_CENTER_KEY] = center
-        out[AUTO_STANDARDIZATION_SCALE_KEY] = scale
-        return out
+        with CudaTimer(POOL_HEAD_STAGE, past.device):
+            column_tokens = encoded[:, history.shape[1] :, :].reshape(
+                batch_size, horizon_count, active_dim, self.cfg.d_model
+            )
+            params = self.head(
+                self._pool_horizons(column_tokens), column_tokens=column_tokens
+            )
+
+            out = dict(params)
+            out["means"] = (
+                center.unsqueeze(2)
+                + scale.unsqueeze(2) * params["means"][..., :active_dim]
+            )
+            out["lowrank_diag"] = (
+                params["lowrank_diag"][..., :active_dim] * scale.unsqueeze(2) ** 2
+            )
+            out["lowrank_U"] = params["lowrank_U"][
+                ..., :active_dim, :
+            ] * scale.unsqueeze(2).unsqueeze(-1)
+            out[AUTO_STANDARDIZATION_CENTER_KEY] = center
+            out[AUTO_STANDARDIZATION_SCALE_KEY] = scale
+            return out
 
 
 __all__ = ["JointFM", "SinusoidalPosition"]
