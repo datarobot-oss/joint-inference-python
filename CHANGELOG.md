@@ -1,3 +1,9 @@
+## v0.7.0 (2026-11-14)
+
+### Feat
+
+- Serve JointFM 1 heads with a two-sided per-column sinh-arcsinh tail map, covering sampling, density, exact means and quantiles, and equality and interval conditioning, and report the map as tail_map in /healthz
+
 ## v0.6.0 (2026-11-12)
 
 ### Feat
