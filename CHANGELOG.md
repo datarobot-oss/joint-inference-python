@@ -1,3 +1,9 @@
+## v0.7.1 (2026-11-14)
+
+### Fix
+
+- Refuse a pinned value too far out to condition on as a validation error that names the cause, instead of non-finite parameters or an internal error
+
 ## v0.7.0 (2026-11-14)
 
 ### Feat
