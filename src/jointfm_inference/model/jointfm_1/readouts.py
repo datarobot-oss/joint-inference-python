@@ -73,6 +73,19 @@ class ColumnFactorReadout(nn.Module):
             ValueError: when the token or context shapes do not match the
                 construction-time widths or each other.
         """
+        return self.project(self.features(column_tokens, context))
+
+    def features(self, column_tokens: Tensor, context: Tensor) -> Tensor:
+        """Return the per-column MLP's hidden features ``(B, H, D_active, hidden)``.
+
+        They are the state before the output projection, so another
+        projection of them that is shared by every column, such as the tail
+        readout, stays equivariant under column permutation.
+
+        Raises:
+            ValueError: when the token or context shapes do not match the
+                construction-time widths or each other.
+        """
         if column_tokens.dim() != 4 or column_tokens.shape[-1] != self.column_dim:
             raise ValueError(
                 f"column_tokens must have shape (B, H, D_active, {self.column_dim}), "
@@ -85,11 +98,15 @@ class ColumnFactorReadout(nn.Module):
                 f"got {tuple(context.shape)}"
             )
         context_per_column = context.unsqueeze(2).expand(-1, -1, active_dim, -1)
-        features = torch.cat(
+        inputs = torch.cat(
             [column_tokens, context_per_column.to(dtype=column_tokens.dtype)], dim=-1
         )
-        hidden = self.norm(self.activation(self.input(features)))
-        rows = self.output(hidden).reshape(
+        return self.norm(self.activation(self.input(inputs)))
+
+    def project(self, features: Tensor) -> Tensor:
+        """Project :meth:`features` output to rows ``(B, H, K, D_active, rank)``."""
+        batch_size, horizon_count, active_dim, _ = features.shape
+        rows = self.output(features).reshape(
             batch_size, horizon_count, active_dim, self.n_components, self.rank
         )
         return rows.permute(0, 1, 3, 2, 4)
@@ -142,7 +159,56 @@ class ColumnLocationReadout(nn.Module):
 
     def forward(self, column_tokens: Tensor, context: Tensor, capacity: int) -> Tensor:
         """Return the per-column terms as ``(B, H, K, capacity, LOCATION_OUTPUTS)``."""
-        return _pad_columns(self.readout(column_tokens, context), capacity)
+        return self.terms(self.features(column_tokens, context), capacity)
+
+    def features(self, column_tokens: Tensor, context: Tensor) -> Tensor:
+        """Return the per-column MLP's hidden features ``(B, H, D_active, hidden)``.
+
+        A head with a tail readout computes them once and hands them to
+        :meth:`terms` and to :class:`ColumnTailReadout`.
+        """
+        return self.readout.features(column_tokens, context)
+
+    def terms(self, features: Tensor, capacity: int) -> Tensor:
+        """Return the per-column terms of :meth:`features` output, zero-padded to ``capacity``."""
+        return _pad_columns(self.readout.project(features), capacity)
+
+
+# Raw tail values per column: the upper side's, then the lower side's.
+TAIL_SIDE_COUNT = 2
+
+
+class ColumnTailReadout(nn.Module):
+    """Emit each column's upper and lower raw tail values from the location readout's features.
+
+    ``forward(features, capacity)`` takes the per-column hidden features
+    ``(B, H, D_active, hidden)`` of :meth:`ColumnLocationReadout.features`
+    and returns ``(B, H, capacity, TAIL_SIDE_COUNT)``: per column the upper
+    side's raw value, then the lower side's; absent columns get zero, the raw
+    value of the identity map. One bias-free projection applied to every
+    column's own features ties no output to a column position, so permuting
+    the columns permutes the values.
+    """
+
+    def __init__(self, *, hidden: int) -> None:
+        """Build the bias-free projection of ``hidden`` features."""
+        super().__init__()
+        self.hidden = int(hidden)
+        self.output = nn.Linear(self.hidden, TAIL_SIDE_COUNT, bias=False)
+
+    def forward(self, features: Tensor, capacity: int) -> Tensor:
+        """Return the raw tail values ``(B, H, capacity, TAIL_SIDE_COUNT)``, upper then lower.
+
+        Raises:
+            ValueError: when ``features`` is not ``(B, H, D_active, hidden)``
+                or carries more columns than ``capacity``.
+        """
+        if features.dim() != 4 or features.shape[-1] != self.hidden:
+            raise ValueError(
+                f"features must have shape (B, H, D_active, {self.hidden}), got "
+                f"{tuple(features.shape)}"
+            )
+        return _pad_columns(self.output(features), capacity)
 
 
 def emit_lowrank_covariance(
@@ -181,7 +247,9 @@ __all__ = [
     "MAX_SOFTPLUS",
     "MEAN_OUTPUT",
     "RAW_DIAG_OUTPUT",
+    "TAIL_SIDE_COUNT",
     "ColumnFactorReadout",
     "ColumnLocationReadout",
+    "ColumnTailReadout",
     "emit_lowrank_covariance",
 ]

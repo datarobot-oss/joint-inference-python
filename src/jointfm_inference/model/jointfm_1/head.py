@@ -40,13 +40,22 @@ from jointfm_inference.model.jointfm_1.readouts import (
     RAW_DIAG_OUTPUT,
     ColumnFactorReadout,
     ColumnLocationReadout,
+    ColumnTailReadout,
     emit_lowrank_covariance,
+)
+from jointfm_inference.model.jointfm_1.tail_map import (
+    TAIL_LOWER_KEY,
+    TAIL_UPPER_KEY,
+    ColumnTailMap,
+    mapped_mixture_log_prob,
+    tail_parameter,
 )
 from jointfm_inference.model.linalg import (
     apply_selected_cholesky,
     cholesky_from_lowrank,
     compute_whitened_residuals,
 )
+from jointfm_inference.model.precision import upcast_reduced_precision
 
 # Keys under which the network attaches the standardization statistics of the
 # history window to its emitted parameters. They describe the window, not a
@@ -132,6 +141,15 @@ class StudentTHead(nn.Module):
     ``logits`` ``(B, H, K)``, ``means`` ``(B, H, K, D)``, ``df`` ``(B, H, K)``,
     ``lowrank_diag`` ``(B, H, K, D)`` and ``lowrank_U`` ``(B, H, K, D, rank)``,
     with ``D`` the column capacity, which sizes no parameter.
+
+    A head built with ``tail_parameter_bounds`` also has a per-column tail map
+    (:mod:`jointfm_inference.model.jointfm_1.tail_map`): its mixture is the
+    latent law, and :class:`ColumnTailReadout` decodes each column's upper and
+    lower tail parameters from the location readout's features, emitted in
+    float32 under ``TAIL_UPPER_KEY`` and ``TAIL_LOWER_KEY`` ``(B, H, D)``.
+    The network attaches the map's anchors after it rescales the mixture to
+    data units, so every distribution method takes a mapping that carries
+    the whole map, and refuses one that does not match the head.
     """
 
     def __init__(
@@ -145,14 +163,21 @@ class StudentTHead(nn.Module):
         covariance_rank: int,
         min_df: float,
         min_scale: float,
+        tail_parameter_bounds: Optional[tuple[float, float]] = None,
     ):
-        """Build the trunk, the pooled projections, and the per-column readouts."""
+        """Build the trunk, the pooled projections, and the per-column readouts.
+
+        ``tail_parameter_bounds`` is the ``(minimum, maximum)`` of every tail
+        parameter of a head with a per-column tail map, ``None`` for a head
+        without one.
+        """
         super().__init__()
         self.D = D
         self.K = K
         self.min_df = min_df
         self.min_scale = min_scale
         self.covariance_rank = int(covariance_rank)
+        self.tail_parameter_bounds = tail_parameter_bounds
 
         layers: list[nn.Module] = []
         in_dim = d_model
@@ -178,6 +203,11 @@ class StudentTHead(nn.Module):
             n_components=K,
             rank=self.covariance_rank,
         )
+        self.column_tail = (
+            None
+            if tail_parameter_bounds is None
+            else ColumnTailReadout(hidden=trunk_hidden)
+        )
 
     def forward(self, x: Tensor, column_tokens: Tensor) -> Dict[str, Tensor]:
         """Map the pooled context and the per-column tokens to mixture parameters.
@@ -186,10 +216,12 @@ class StudentTHead(nn.Module):
             x: ``(B, H, d_model)`` pooled per-horizon context.
             column_tokens: ``(B, H, D_active, d_model)`` per-column horizon
                 tokens; absent columns up to the capacity ``D`` get zero
-                factor rows and sit at the shared base.
+                factor rows and sit at the shared base, and a head with a
+                tail map gives them the identity map.
         """
         h = self.trunk(x)
-        column_terms = self.column_location(column_tokens, h, capacity=self.D)
+        column_features = self.column_location.features(column_tokens, h)
+        column_terms = self.column_location.terms(column_features, capacity=self.D)
         logits = self.out_logits(h)
         means = self.mean_base(h).unsqueeze(-1) + column_terms[..., MEAN_OUTPUT]
         log_df_excess = self.out_log_df(h)
@@ -213,15 +245,47 @@ class StudentTHead(nn.Module):
                 dtype=logits.dtype,
             )
         )
+        if self.column_tail is not None and self.tail_parameter_bounds is not None:
+            minimum, maximum = self.tail_parameter_bounds
+            # Squashed in float32: a reduced precision would round the tail
+            # parameters to about three digits.
+            raw = upcast_reduced_precision(
+                {"raw": self.column_tail(column_features, self.D)}
+            )["raw"]
+            out[TAIL_UPPER_KEY], out[TAIL_LOWER_KEY] = tail_parameter(
+                raw, minimum=minimum, maximum=maximum
+            ).unbind(-1)
         return out
+
+    def _tail_map(self, params: Dict[str, Tensor]) -> Optional[ColumnTailMap]:
+        """Return the tail map ``params`` carries, refusing one that does not match the head.
+
+        Raises:
+            ValueError: when a head with a tail map gets parameters without
+                one, or a head without a map gets parameters with one, which
+                would score or draw a law other than the forecast.
+        """
+        tail_map = ColumnTailMap.from_params(params)
+        if (tail_map is None) != (self.column_tail is None):
+            raise ValueError(
+                "StudentTHead has "
+                f"{'no' if self.column_tail is None else 'a'} per-column tail map, "
+                f"but the parameters {'carry' if tail_map is not None else 'lack'} one"
+            )
+        return tail_map
 
     def log_prob(self, params: Dict[str, Tensor], y: Tensor) -> Tensor:
         """Return the ``(B, H)`` mixture log-density of ``y`` ``(B, H, D)``.
 
         ``params`` may be the emitted parameters or a conditioned mapping with
         a dense ``chol``; the component count is read from ``logits``, so a
-        pooled conditional mixture is accepted too.
+        pooled conditional mixture is accepted too. Under a tail map the
+        density is :func:`~jointfm_inference.model.jointfm_1.tail_map.mapped_mixture_log_prob`,
+        evaluated in float64.
         """
+        tail_map = self._tail_map(params)
+        if tail_map is not None:
+            return self._mapped_log_prob(params, tail_map, y)
         logits = params["logits"]
         orig_dtype = logits.dtype
         compute_dtype = torch.float32
@@ -265,13 +329,36 @@ class StudentTHead(nn.Module):
         )
         return log_like.reshape(B, H).to(dtype=orig_dtype)
 
+    def _mapped_log_prob(
+        self, params: Dict[str, Tensor], tail_map: ColumnTailMap, y: Tensor
+    ) -> Tensor:
+        """Return the ``(B, H)`` log-density of ``y`` under the mapped mixture."""
+        logits = params["logits"]
+        B, H, D = y.shape
+        K = logits.shape[-1]
+        double = {name: value.double() for name, value in params.items()}
+        log_like = mapped_mixture_log_prob(
+            logits=double["logits"].reshape(B * H, K),
+            means=double["means"].reshape(B * H, K, D),
+            chol=_component_cholesky(double, B * H, K),
+            df=double["df"].reshape(B * H, K),
+            tail_map=tail_map.reshape(B * H, D),
+            values=y.reshape(B * H, D),
+        )
+        return log_like.reshape(B, H).to(dtype=logits.dtype)
+
     def sample(
         self,
         params: Dict[str, Tensor],
         num_samples: int = 1,
         rng: Optional[torch.Generator] = None,
     ) -> Tensor:
-        """Draw ``(B * num_samples, H, D)`` samples, batch-major."""
+        """Draw ``(B * num_samples, H, D)`` samples, batch-major.
+
+        Under a tail map every latent draw maps through it, with the random
+        stream of the latent draw.
+        """
+        tail_map = self._tail_map(params)
         logits = params["logits"]
         means = params["means"]
         df = params["df"]
@@ -309,6 +396,8 @@ class StudentTHead(nn.Module):
             w = torch.clamp(2.0 * gamma_samples, min=MIN_CHI2_DRAW)
         with CudaTimer(SAMPLE_ASSEMBLE_STAGE, logits.device):
             samples = means_selected + z_mvn * torch.sqrt(df_selected / w).unsqueeze(-1)
+            if tail_map is not None:
+                samples = tail_map.reshape(B * H, 1, D).to_data(samples)
             return (
                 samples.reshape(B, H, num_samples, D)
                 .permute(0, 2, 1, 3)
@@ -316,20 +405,24 @@ class StudentTHead(nn.Module):
             )
 
     def mean(self, params: Dict[str, Tensor]) -> Tensor:
-        """Return the exact ``(B, H, D)`` mean: the mixture-weighted locations.
+        """Return the exact ``(B, H, D)`` mean.
 
-        It draws nothing, so it is the same for every seed
+        Without a tail map it is the mixture-weighted locations; with one, a
+        quadrature to a stated tolerance. It draws nothing, so it is the same
+        for every seed
         (:func:`~jointfm_inference.model.jointfm_1.marginals.mixture_mean`).
         """
+        self._tail_map(params)
         return mixture_mean(params)
 
     def quantiles(self, params: Dict[str, Tensor], q: Sequence[float]) -> Tensor:
         """Return exact marginal quantiles ``(len(q), B, H, D)``.
 
-        Each is the root of its column's marginal mixture distribution
-        function, bisected to a stated tolerance without drawing
+        Each is the root of its column's marginal distribution function,
+        bisected to a stated tolerance without drawing
         (:func:`~jointfm_inference.model.jointfm_1.marginals.mixture_quantiles`).
         """
+        self._tail_map(params)
         return mixture_quantiles(params, q)
 
 

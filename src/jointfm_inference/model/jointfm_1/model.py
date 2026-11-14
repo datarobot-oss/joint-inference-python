@@ -32,7 +32,9 @@ from jointfm_inference.model.jointfm_1.head import (
     StudentTHead,
 )
 from jointfm_inference.model.jointfm_1.input_scale import input_scale
+from jointfm_inference.model.jointfm_1.marginals import attach_column_anchors
 from jointfm_inference.model.jointfm_1.pooling import _PMA
+from jointfm_inference.model.jointfm_1.tail_map import TAIL_LOWER_KEY, TAIL_UPPER_KEY
 
 PAST_TOKEN_TYPE = 0
 QUERY_TOKEN_TYPE = 1
@@ -128,6 +130,12 @@ class JointFM(nn.Module):
             covariance_rank=cfg.covariance_rank,
             min_df=cfg.head_min_df,
             min_scale=cfg.head_min_scale,
+            tail_parameter_bounds=(
+                (cfg.head_tail_parameter_min, cfg.head_tail_parameter_max)
+                if cfg.head_tail_parameter_min is not None
+                and cfg.head_tail_parameter_max is not None
+                else None
+            ),
         )
 
     def _history_tokens(self, past: Tensor, time_indices: Tensor) -> Tensor:
@@ -202,7 +210,10 @@ class JointFM(nn.Module):
         Returns:
             The head's parameters (means and covariances in data space) plus
             the standardization center and scale under
-            ``AUTO_STANDARDIZATION_CENTER_KEY`` and ``..._SCALE_KEY``.
+            ``AUTO_STANDARDIZATION_CENTER_KEY`` and ``..._SCALE_KEY``. A head
+            with a per-column tail map adds its tail parameters and the map's
+            anchors, computed from the data-space mixture, over the
+            ``D_active`` columns.
 
         Raises:
             ValueError: On malformed shapes, or a column whose history
@@ -250,6 +261,12 @@ class JointFM(nn.Module):
             out["lowrank_U"] = params["lowrank_U"][
                 ..., :active_dim, :
             ] * scale.unsqueeze(2).unsqueeze(-1)
+            if self.cfg.has_tail_map:
+                # Tail parameters are scale-free, so destandardizing leaves
+                # them alone; the anchors belong to the data-unit mixture.
+                for tail_key in (TAIL_UPPER_KEY, TAIL_LOWER_KEY):
+                    out[tail_key] = params[tail_key][..., :active_dim]
+                out = attach_column_anchors(out)
             out[AUTO_STANDARDIZATION_CENTER_KEY] = center
             out[AUTO_STANDARDIZATION_SCALE_KEY] = scale
             return out

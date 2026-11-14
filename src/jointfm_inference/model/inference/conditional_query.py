@@ -32,6 +32,15 @@ the same closed form:
    read-out columns: a draw contributes its own conditional, with weight
    ``1/S``. Every read-out then reuses the head's own sampler and scorer on
    that pooled mixture rather than a second implementation of them.
+
+Under a per-column tail map (:mod:`jointfm_inference.model.jointfm_1.tail_map`)
+every column's data value is an increasing function of its latent coordinate,
+so both steps run on the latent mixture. The equality step maps the pinned
+values in itself (:meth:`PredictorAdapter.condition`). The interval step maps
+each bound to its latent image, keeps an infinite bound infinite, walks the
+latent box, whose probability is the data box's, and maps the draws back.
+Every conditional keeps the map of its columns, so its read-outs are the
+mapped law's.
 """
 
 from __future__ import annotations
@@ -44,6 +53,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from jointfm_inference.model.jointfm_1.head import AUTO_STANDARDIZATION_METADATA_KEYS
+from jointfm_inference.model.jointfm_1.tail_map import TAIL_MAP_KEYS, ColumnTailMap
 from jointfm_inference.model.linalg import robust_cholesky
 
 from .adapter import PredictorAdapter
@@ -60,13 +70,15 @@ DEFAULT_INTERVAL_POINTS = 8192
 def _mixture_shapes(components: int, width: int) -> Dict[str, tuple[int, ...]]:
     """Trailing shapes of one conditioned mixture parameter mapping, per name.
 
-    An unexpected key raises here instead of being dropped silently.
+    A tail map's keys carry one value per column and no component axis. An
+    unexpected key raises here instead of being dropped silently.
     """
     return {
         "logits": (components,),
         "means": (components, width),
         "chol": (components, width, width),
         "df": (components,),
+        **{key: (width,) for key in TAIL_MAP_KEYS},
     }
 
 
@@ -389,7 +401,7 @@ class ConditionalReadOut:
 # The parameter keys a conditioned position may carry; anything else is a
 # defect rather than a layout to guess at.
 _PARAMETER_KEYS = frozenset(
-    {"logits", "df", "means", "lowrank_diag", "lowrank_U", "chol"}
+    {"logits", "df", "means", "lowrank_diag", "lowrank_U", "chol", *TAIL_MAP_KEYS}
 )
 
 # The emitted mapping also carries the standardization statistics of the history
@@ -433,6 +445,20 @@ def _position_params(
             raise ValueError(f"emitted parameter {name!r} is not a mixture parameter")
         sliced[name] = value[:, horizon : horizon + 1]
     return sliced
+
+
+def _latent_bound(interval_map: ColumnTailMap, bound: Tensor) -> Tensor:
+    """Map ``(m,)`` interval bounds to their latent images ``(B, 1, m)``.
+
+    The map is increasing, so the latent box holds exactly the latent images
+    of the data box; an infinite bound stays infinite.
+    """
+    finite = torch.isfinite(bound)
+    finite_bound = torch.where(finite, bound, torch.zeros_like(bound))
+    latent = interval_map.to_latent(
+        finite_bound.to(dtype=torch.float64).expand_as(interval_map.anchor_location)
+    )
+    return torch.where(finite, latent, bound.to(dtype=torch.float64).expand_as(latent))
 
 
 def _read_out_bound(
@@ -543,6 +569,8 @@ def condition_at_position(
 
     reduced_df = reduced.params["df"]
 
+    reduced_map = ColumnTailMap.from_params(reduced.params)
+
     if not request.interval_columns:
         pooled_params = dict(reduced.params)
         pooled_params["logits"] = F.log_softmax(reduced.params["logits"], dim=-1)
@@ -550,6 +578,8 @@ def condition_at_position(
         pooled_params["chol"] = reduced.params["chol"][..., read_out_local, :][
             ..., :, read_out_local
         ]
+        if reduced_map is not None:
+            pooled_params.update(reduced_map.columns(read_out_local).to_params())
         pooled = PredictorAdapter(adapter.head, pooled_params)
         return ConditionalReadOut(
             pooled=pooled,
@@ -581,6 +611,10 @@ def condition_at_position(
     block_scale = scale.index_select(-1, block_index).index_select(-2, block_index)
     lower = torch.tensor(request.interval_lower, dtype=torch.float64, device=device)
     upper = torch.tensor(request.interval_upper, dtype=torch.float64, device=device)
+    interval_map = None if reduced_map is None else reduced_map.columns(interval_local)
+    if interval_map is not None:
+        lower = _latent_bound(interval_map, lower)
+        upper = _latent_bound(interval_map, upper)
     # A point is reused whenever the resampling draws it twice, so the walk
     # never runs on fewer points than the draw budget it has to feed.
     walk_points = max(interval_points, n_samples)
@@ -617,6 +651,10 @@ def condition_at_position(
     interval_draws = torch.gather(
         flat_draws, 1, draw_index.unsqueeze(-1).expand(-1, -1, block_width)
     )
+    if interval_map is not None:
+        interval_draws = interval_map.reshape(batch_count, 1, block_width).to_data(
+            interval_draws
+        )
     # A single interval column needs no estimation: its box probability is one
     # CDF difference and its draws are inverse CDFs, so every weight inside a
     # component is the same and there is no estimator to characterize.
@@ -647,7 +685,11 @@ def condition_at_position(
     )
 
     read_out_width = len(read_out_columns)
-    normalized = dict(per_draw.params)
+    normalized = {
+        name: value
+        for name, value in per_draw.params.items()
+        if name not in TAIL_MAP_KEYS
+    }
     normalized["logits"] = F.log_softmax(per_draw.params["logits"], dim=-1) - torch.log(
         torch.tensor(float(n_samples), dtype=dtype, device=device)
     )
@@ -657,6 +699,10 @@ def condition_at_position(
         components=n_samples * component_count,
         width=read_out_width,
     )
+    if reduced_map is not None:
+        # Every draw's conditional keeps the read-out columns' map of the
+        # reduced mixture, so the pooled mixture keeps it once.
+        pooled_params.update(reduced_map.columns(read_out_local).to_params())
     pooled = PredictorAdapter(adapter.head, pooled_params)
 
     folded = _reshape_mixture(

@@ -208,6 +208,11 @@ class ConditionalDistributionResult(InferenceDistributionResult, Protocol):
         ...
 
 
+NO_TAIL_MAP: Final = "none"
+"""What :attr:`InferenceBackend.tail_map` reports for a head whose forecast is
+its mixture itself."""
+
+
 @runtime_checkable
 class InferenceBackend(Protocol):
     """One serving backend mounted on one loaded model.
@@ -232,6 +237,16 @@ class InferenceBackend(Protocol):
 
         Built with :func:`normalize_head_name`, so one head kind has one name
         whatever generation serves it.
+        """
+        ...
+
+    @property
+    def tail_map(self) -> str:
+        """The per-column tail map the mounted head's forecast applies, as ``/healthz`` reports it.
+
+        :data:`NO_TAIL_MAP` for a head whose forecast is its mixture itself,
+        or the map's name, such as ``'sinh_arcsinh_column'``
+        (:mod:`jointfm_inference.model.jointfm_1.tail_map`).
         """
         ...
 
@@ -424,6 +439,7 @@ class JointFM1DistributionResult:
 
 __all__ = [
     "INFERENCE_RETURN_MODES",
+    "NO_TAIL_MAP",
     "CanonicalInferenceRequest",
     "ConditionalDistributionResult",
     "InferenceBackend",

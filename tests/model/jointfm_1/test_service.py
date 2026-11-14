@@ -586,6 +586,7 @@ def test_health_payload_reports_the_served_jointfm_1_contract() -> None:
         "precision": SERVICE_PRECISION,
         "generation": "jointfm-1",
         "head": "studentt",
+        "tail_map": "none",
         "decoding_strategy": "parallel_dense",
         "supported_query_modes": ["forecast", "condition"],
         "supported_condition_kinds": ["equality", "interval"],

@@ -266,8 +266,10 @@ def walk_box(
         chol: ``(..., K, m, m)`` lower-triangular Cholesky factors of those
             columns' covariance — the scale matrix for a Student-t mixture,
             which is the covariance only up to the ``nu / (nu - 2)`` factor.
-        lower: ``(m,)`` lower bounds, ``-inf`` for an open side.
-        upper: ``(m,)`` upper bounds, ``+inf`` for an open side.
+        lower: ``(m,)`` lower bounds shared by every leading row, or
+            ``(..., m)`` bounds per row (the leading axes of ``means``
+            without its component axis), ``-inf`` for an open side.
+        upper: Upper bounds of ``lower``'s shape, ``+inf`` for an open side.
         points: Number of quasi-random points per component.
         df: ``(..., K)`` degrees of freedom of each Student-t component.
         rng: Optional generator seeding the Sobol scramble.
@@ -299,10 +301,14 @@ def walk_box(
             f"chol must be square at the block width {block_width}; got "
             f"{tuple(chol.shape[-2:])}"
         )
-    if lower.shape != (block_width,) or upper.shape != (block_width,):
+    row_shape = tuple(means.shape[:-2]) + (block_width,)
+    if lower.shape != upper.shape or tuple(lower.shape) not in (
+        (block_width,),
+        row_shape,
+    ):
         raise ValueError(
-            f"lower and upper must both have shape ({block_width},); got "
-            f"{tuple(lower.shape)} and {tuple(upper.shape)}"
+            f"lower and upper must both have shape ({block_width},) or "
+            f"{row_shape}; got {tuple(lower.shape)} and {tuple(upper.shape)}"
         )
     if not bool((lower < upper).all().item()):
         raise ValueError("every interval must have lower < upper")
@@ -312,8 +318,9 @@ def walk_box(
     device = means.device
     means_64 = means.to(torch.float64)
     chol_64 = chol.to(torch.float64)
-    lower_64 = lower.to(device=device, dtype=torch.float64)
-    upper_64 = upper.to(device=device, dtype=torch.float64)
+    # (..., 1, 1, m): one bound per row, broadcast over components and points.
+    lower_64 = lower.to(device=device, dtype=torch.float64)[..., None, None, :]
+    upper_64 = upper.to(device=device, dtype=torch.float64)[..., None, None, :]
 
     if df.shape != means.shape[:-1]:
         raise ValueError(
@@ -345,8 +352,8 @@ def walk_box(
             offset = offset + (factor_row * whitened[..., :column]).sum(dim=-1)
         multiplier = law.scale_multiplier(column, squared_distance)
         scale = chol_64[..., column, column].unsqueeze(-1) * multiplier
-        low = (lower_64[column] - offset) / scale
-        high = (upper_64[column] - offset) / scale
+        low = (lower_64[..., column] - offset) / scale
+        high = (upper_64[..., column] - offset) / scale
 
         # Orienting the interval toward the left tail keeps both distribution
         # function values small, where their difference keeps its significant

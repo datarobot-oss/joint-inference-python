@@ -35,6 +35,7 @@ from jointfm_inference.model.jointfm_1.config import JointFMConfig
 from jointfm_inference.model.jointfm_1.head import StudentTHead
 from jointfm_inference.model.jointfm_1.model import JointFM
 from jointfm_inference.model.jointfm_1.sign_symmetry import symmetric_mixture
+from jointfm_inference.model.jointfm_1.tail_map import SINH_ARCSINH_COLUMN_TAIL_MAP
 from jointfm_inference.model.precision import autocast_context, upcast_reduced_precision
 
 from jointfm_inference.data.types import METADATA_COLUMN_NAMES_KEY, CanonicalSample
@@ -46,6 +47,7 @@ from jointfm_inference.model.jointfm_1.input_scale import (
 from .adapter import PredictorAdapter
 from .contract import (
     INFERENCE_RETURN_MODES,
+    NO_TAIL_MAP,
     CanonicalInferenceRequest,
     InferenceDistributionResult,
     InferenceRequestError,
@@ -98,6 +100,13 @@ class JointFM1InferenceBackend:
     def head_name(self) -> str:
         """Return the head class name normalized by :func:`normalize_head_name`."""
         return normalize_head_name(type(self._head).__name__)
+
+    @property
+    def tail_map(self) -> str:
+        """Return the head's per-column tail map, ``'none'`` for a head without one."""
+        if self._model.cfg.has_tail_map:
+            return SINH_ARCSINH_COLUMN_TAIL_MAP
+        return NO_TAIL_MAP
 
     @property
     def time_index_support(self) -> TimeIndexSupport:

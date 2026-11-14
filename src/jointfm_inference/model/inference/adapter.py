@@ -25,6 +25,7 @@ from typing import Dict, Optional, Sequence
 import torch
 
 from jointfm_inference.model.jointfm_1.head import StudentTHead
+from jointfm_inference.model.jointfm_1.tail_map import ColumnTailMap
 
 from ._bounds import (
     _SampleBound,
@@ -153,6 +154,14 @@ class PredictorAdapter:
         known columns. The returned adapter carries the reduced-width
         conditional in the head's own parameter mapping (with a dense
         Cholesky factor), so its sampling and scoring apply unchanged.
+
+        Under a per-column tail map the known values are conditioned on
+        through their latent images, and the conditional keeps the map of the
+        unknown columns, anchors included, beside the conditioned latent. The
+        map's log-derivative at the known values is the same for every
+        component, so it leaves the posterior weights unchanged and is taken
+        off every unnormalized weight, which makes their normalizer the
+        density of the known data values rather than of their latent images.
         """
         means = self.params["means"]
         full_dim = means.shape[-1]
@@ -162,18 +171,44 @@ class PredictorAdapter:
             raise TypeError("mask must be a bool tensor")
         if mask.shape != (full_dim,):
             raise ValueError(f"mask must have shape ({full_dim},)")
+        known = mask.to(device=means.device, dtype=torch.bool)
+        tail_map = ColumnTailMap.from_params(self.params)
+        known_columns = torch.nonzero(known).squeeze(1)
+        latent_values = values
+        if tail_map is not None and known_columns.numel():
+            known_values = values.index_select(-1, known_columns)
+            known_map = tail_map.columns(known_columns)
+            latent_values = values.index_copy(
+                -1, known_columns, known_map.to_latent(known_values)
+            )
         new_logits, new_means, new_chol, new_df = condition_student_t_mixture(
             self.params["logits"],
             means,
             MixtureCovariance.from_params(self.params),
             self.params["df"],
-            values,
-            mask.to(device=means.device, dtype=torch.bool),
+            latent_values,
+            known,
         )
-        return PredictorAdapter(
-            self.head,
-            {"logits": new_logits, "means": new_means, "chol": new_chol, "df": new_df},
-        )
+        conditioned = {
+            "logits": new_logits,
+            "means": new_means,
+            "chol": new_chol,
+            "df": new_df,
+        }
+        if tail_map is not None:
+            if known_columns.numel():
+                log_derivative = (
+                    tail_map.columns(known_columns)
+                    .log_derivative(values.index_select(-1, known_columns))
+                    .sum(dim=-1)
+                )
+                conditioned["logits"] = new_logits - log_derivative.unsqueeze(-1).to(
+                    dtype=new_logits.dtype
+                )
+            conditioned.update(
+                tail_map.columns(torch.nonzero(~known).squeeze(1)).to_params()
+            )
+        return PredictorAdapter(self.head, conditioned)
 
 
 __all__ = ["PredictorAdapter"]

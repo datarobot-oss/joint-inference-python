@@ -20,8 +20,9 @@ column is a query row on the time axis, a set-transformer pooling of each
 horizon's column tokens, and a Student-t mixture head with a low-rank
 covariance per component, decoding every queried horizon in one pass.
 ``JointFMConfig`` carries the sizes that vary between checkpoints of that
-architecture and whether the checkpoint predicts with its sign-symmetric
-mixture; a checkpoint stores it under ``cfg`` as a flat mapping.
+architecture, whether the checkpoint predicts with its sign-symmetric
+mixture, and the bounds of its per-column tail map when the head has one; a
+checkpoint stores it under ``cfg`` as a flat mapping.
 """
 
 from __future__ import annotations
@@ -29,6 +30,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, fields
 from typing import Any, Optional
+
+from jointfm_inference.model.jointfm_1.tail_map import (
+    TAIL_PARAMETER_CEILING,
+    TAIL_PARAMETER_FLOOR,
+)
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,15 @@ class JointFMConfig:
             (:mod:`jointfm_inference.model.jointfm_1.sign_symmetry`). Off
             predicts with the head's mixture as emitted; a ``cfg`` without
             the key is off.
+        head_tail_parameter_min: Lower bound of every column's two tail
+            parameters under the head's per-column tail map
+            (:mod:`jointfm_inference.model.jointfm_1.tail_map`). Set together
+            with ``head_tail_parameter_max``, it gives the head its tail
+            readout and maps every column of the forecast; both unset (a
+            ``cfg`` without the keys) is the head without a map, whose
+            forecast is the Student-t mixture itself.
+        head_tail_parameter_max: Upper bound of every column's two tail
+            parameters; set exactly when ``head_tail_parameter_min`` is.
     """
 
     num_layers: int
@@ -100,14 +115,22 @@ class JointFMConfig:
     pooling_seeds: int
     pooling_layers: int
     sign_symmetric_prediction: bool = False
+    head_tail_parameter_min: Optional[float] = None
+    head_tail_parameter_max: Optional[float] = None
+
+    @property
+    def has_tail_map(self) -> bool:
+        """Whether the head maps every column through its per-column tail map."""
+        return self.head_tail_parameter_min is not None
 
     def __post_init__(self) -> None:
-        """Refuse sizes the network cannot be built with, and a non-bool switch."""
+        """Refuse sizes the network cannot be built with, a non-bool switch, and bad tail bounds."""
         if not isinstance(self.sign_symmetric_prediction, bool):
             raise TypeError(
                 "sign_symmetric_prediction must be a bool, got "
                 f"{type(self.sign_symmetric_prediction).__name__}"
             )
+        self._require_tail_bounds()
         positive = (
             "num_layers",
             "column_capacity",
@@ -163,12 +186,56 @@ class JointFMConfig:
                 f"{self.attention_cnn_kernel_size}"
             )
 
+    def _require_tail_bounds(self) -> None:
+        """Refuse tail parameter bounds the map cannot serve.
+
+        Raises:
+            ValueError: when only one bound is set; when the bounds leave
+                ``TAIL_PARAMETER_FLOOR <= min < 1 < max <=
+                TAIL_PARAMETER_CEILING``; when ``max`` is not below half of
+                ``head_min_df``, which every component's degrees of freedom
+                exceed, so a column's variance and mean could be infinite; or
+                when the map is combined with ``sign_symmetric_prediction``,
+                whose mixture this runner forms only for the head without a
+                map.
+        """
+        minimum, maximum = self.head_tail_parameter_min, self.head_tail_parameter_max
+        if (minimum is None) != (maximum is None):
+            raise ValueError(
+                "head_tail_parameter_min and head_tail_parameter_max must be set "
+                f"together, got {minimum} and {maximum}"
+            )
+        if minimum is None or maximum is None:
+            return
+        if (
+            not TAIL_PARAMETER_FLOOR
+            <= minimum
+            < 1.0
+            < maximum
+            <= TAIL_PARAMETER_CEILING
+        ):
+            raise ValueError(
+                "tail parameter bounds must satisfy "
+                f"{TAIL_PARAMETER_FLOOR} <= min < 1 < max <= {TAIL_PARAMETER_CEILING}, "
+                f"got min {minimum} and max {maximum}"
+            )
+        if maximum >= self.head_min_df / 2.0:
+            raise ValueError(
+                f"head_tail_parameter_max {maximum} must be below head_min_df / 2 = "
+                f"{self.head_min_df / 2.0}, so every column's variance is finite"
+            )
+        if self.sign_symmetric_prediction:
+            raise ValueError(
+                "sign_symmetric_prediction is not served together with a per-column "
+                "tail map"
+            )
+
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "JointFMConfig":
         """Build the config from a checkpoint's ``cfg`` mapping.
 
-        A field with a default (``sign_symmetric_prediction``) may be absent
-        and then takes it.
+        A field with a default (``sign_symmetric_prediction`` and the two
+        tail parameter bounds) may be absent and then takes it.
 
         Raises:
             ValueError: when a field without a default is missing or the

@@ -152,8 +152,9 @@ class JointFMHTTPService:
         """Return readiness metadata for the mounted-checkpoint runtime.
 
         Includes identity fields, the model ``precision`` every forward runs
-        at, the advertised query, return, and time-index modes, and the
-        mounted model's ``decoding_strategy``. ``supported_metadata_traits``
+        at, the advertised query, return, and time-index modes, the mounted
+        model's ``decoding_strategy``, and the per-column ``tail_map`` its
+        head applies (``'none'`` without one). ``supported_metadata_traits``
         lists the expert-hint traits a column descriptor may carry.
         """
         time_index_support = self._session.time_index_support
@@ -169,6 +170,7 @@ class JointFMHTTPService:
             "precision": self._session.precision,
             "generation": self._session.generation,
             "head": self._head_name,
+            "tail_map": self._session.backend.tail_map,
             "decoding_strategy": self._session.decoding_strategy,
             "supported_query_modes": list(self._supported_query_modes),
             "supported_condition_kinds": list(self._supported_condition_kinds),

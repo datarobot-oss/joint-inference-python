@@ -49,6 +49,7 @@ from .conditioning import (
 )
 from .contract import (
     INFERENCE_RETURN_MODES,
+    NO_TAIL_MAP,
     CanonicalInferenceRequest,
     ConditionalDistributionResult,
     InferenceBackend,
@@ -66,6 +67,7 @@ __all__ = [
     "DISCRETE_GRID_TIME_INDEX_ENCODING",
     "INFERENCE_BACKEND_ENTRY_POINT_GROUP",
     "INFERENCE_RETURN_MODES",
+    "NO_TAIL_MAP",
     "CanonicalInferenceRequest",
     "CapacityEnvelope",
     "ConditionRequest",
