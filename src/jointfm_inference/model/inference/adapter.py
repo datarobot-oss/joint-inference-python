@@ -162,6 +162,17 @@ class PredictorAdapter:
         component, so it leaves the posterior weights unchanged and is taken
         off every unnormalized weight, which makes their normalizer the
         density of the known data values rather than of their latent images.
+
+        Raises:
+            ValueError: on a malformed ``values`` or a known value the
+                parameters' dtype cannot condition on: one so far from the
+                mixture that the known block's squared Mahalanobis distance
+                is not finite. Under a tail map that distance is the latent
+                image's, which lies further out than the value wherever the
+                map thins a tail, by the power one over the tail parameter;
+                a value outside the map's envelope, or whose image overflows
+                the dtype, is refused the same way.
+            TypeError: when ``mask`` is not boolean.
         """
         means = self.params["means"]
         full_dim = means.shape[-1]

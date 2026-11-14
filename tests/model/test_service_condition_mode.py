@@ -352,6 +352,25 @@ def test_a_malformed_condition_block_is_refused_before_model_execution(
     assert forward.calls == 0
 
 
+def test_a_pin_too_far_to_condition_on_is_refused_with_its_cause() -> None:
+    """A pinned value whose squared distance from the forecast overflows is a condition error that says so."""
+    service, _ = service_and_model()
+    block = [
+        {
+            "column": "driver",
+            "kind": "equality",
+            "value": 1e200,
+            "query_time_indices": [1],
+        }
+    ]
+
+    with pytest.raises(ServiceError, match="too far from the mixture") as rejection:
+        service.predict(make_payload(conditions=block))
+
+    assert rejection.value.code == "VALIDATION_ERROR"
+    assert rejection.value.field == "conditions"
+
+
 @pytest.mark.parametrize("return_mode", ["mean", "samples", "quantiles"])
 def test_a_pinned_column_is_readable_and_carries_the_requested_value(
     return_mode: str,

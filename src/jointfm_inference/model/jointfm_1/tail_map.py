@@ -50,8 +50,9 @@ Every function here works in float64, whatever the input dtype, and returns
 the input dtype. The inverse map grows like ``|v|**(1 / delta)``, so it is the
 step that would overflow float32 first. Values outside the declared envelope
 raise instead of being clipped: tail parameters outside
-``[TAIL_PARAMETER_FLOOR, TAIL_PARAMETER_CEILING]`` and standardized
-residuals beyond :data:`STANDARDIZED_RESIDUAL_LIMIT`.
+``[TAIL_PARAMETER_FLOOR, TAIL_PARAMETER_CEILING]``, standardized residuals
+beyond :data:`STANDARDIZED_RESIDUAL_LIMIT`, and values whose latent image
+overflows their dtype.
 """
 
 from __future__ import annotations
@@ -269,9 +270,10 @@ class ColumnTailMap:
         """Map data values ``(..., D)`` to their latent images, in ``values``' dtype.
 
         Raises:
-            ValueError: when a value is not finite or its standardized
-                residual exceeds :data:`STANDARDIZED_RESIDUAL_LIMIT`.
-            RuntimeError: when a latent image overflows ``values``' dtype.
+            ValueError: when a value is not finite, its standardized residual
+                exceeds :data:`STANDARDIZED_RESIDUAL_LIMIT`, or its latent
+                image overflows ``values``' dtype. The image is a property of
+                the value, so it is refused as one.
         """
         upper, lower, location, scale = self._parts(values)
         standardized = (values.to(_COMPUTE_DTYPE) - location) / scale
@@ -280,7 +282,13 @@ class ColumnTailMap:
         latent = (location + scale * inverse_standardized(standardized, tail)).to(
             dtype=values.dtype
         )
-        _require_finite(latent, "inverse")
+        if not bool(torch.isfinite(latent).all()):
+            raise ValueError(
+                f"a value's latent image under the tail map overflows {latent.dtype}: "
+                "where a column's tail parameter is below one, the image lies "
+                "further from the column's anchor than the value does, by the power "
+                "one over that tail parameter"
+            )
         return latent
 
     def to_data(self, latent: Tensor) -> Tensor:

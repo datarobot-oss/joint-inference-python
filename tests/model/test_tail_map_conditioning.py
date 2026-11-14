@@ -27,7 +27,12 @@ from jointfm_inference.model.inference.conditional_query import (
     condition_at_position,
 )
 from jointfm_inference.model.jointfm_1.head import StudentTHead
-from jointfm_inference.model.jointfm_1.tail_map import TAIL_MAP_KEYS
+from jointfm_inference.model.jointfm_1.tail_map import (
+    ANCHOR_LOCATION_KEY,
+    ANCHOR_SCALE_KEY,
+    TAIL_LOWER_KEY,
+    TAIL_MAP_KEYS,
+)
 
 from tests.support.condition_mode import make_payload
 from tests.support.models import tiny_config, tiny_model
@@ -41,8 +46,8 @@ VALUES = [1.2, -3.5, 4.0]
 CONDITIONAL_TOLERANCE = 1e-7
 
 
-def _adapter() -> PredictorAdapter:
-    """Return an adapter over :func:`mapped_mixture` with a head that has a map."""
+def _adapter(params: dict[str, torch.Tensor] | None = None) -> PredictorAdapter:
+    """Return an adapter over ``params``, :func:`mapped_mixture` by default, with a head that has a map."""
     head = StudentTHead(
         d_model=4,
         D=3,
@@ -54,7 +59,7 @@ def _adapter() -> PredictorAdapter:
         min_scale=1e-4,
         tail_parameter_bounds=(0.2, 1.4),
     )
-    return PredictorAdapter(head, mapped_mixture())
+    return PredictorAdapter(head, mapped_mixture() if params is None else params)
 
 
 def _condition(adapter: PredictorAdapter, known: list[int]) -> PredictorAdapter:
@@ -116,6 +121,56 @@ def test_the_conditional_mean_is_the_mean_of_conditional_draws() -> None:
     standard_error = draws[0, :, 0].std(dim=0) / math.sqrt(draws.shape[1])
 
     assert bool(((mean - drawn).abs() <= 5.0 * standard_error).all())
+
+
+def _pin_below_a_thinned_tail(
+    scales_out: float,
+) -> tuple[PredictorAdapter, torch.Tensor, torch.Tensor]:
+    """Return a float32 adapter, a pin, and its mask ``scales_out`` anchor scales into a thinned tail.
+
+    Column 0's lower tail parameter is the smallest the map allows, 0.2, so
+    below its anchor a value ``v`` anchor scales out has a latent image about
+    ``v ** 5`` scales out.
+    """
+    params = mapped_mixture(dtype=torch.float32)
+    params[TAIL_LOWER_KEY] = params[TAIL_LOWER_KEY].clone()
+    params[TAIL_LOWER_KEY][..., 0] = 0.2
+    pin = params[ANCHOR_LOCATION_KEY].clone()
+    pin[..., 0] -= scales_out * params[ANCHOR_SCALE_KEY][..., 0]
+    return _adapter(params), pin, torch.tensor([True, False, False])
+
+
+@pytest.mark.parametrize(
+    ("scales_out", "message"),
+    [
+        pytest.param(1e5, "too far from the mixture", id="squared-distance"),
+        pytest.param(1e9, "latent image", id="latent-image"),
+    ],
+)
+def test_a_pin_float32_cannot_condition_on_is_refused_as_a_value(
+    scales_out: float, message: str
+) -> None:
+    """A pin too deep in a thinned tail raises ``ValueError`` that names what overflowed.
+
+    The squared distance of the latent image leaves float32 first, then the
+    image itself. Both are properties of the pinned value, so neither may
+    surface as a non-finite parameter or as an internal error.
+    """
+    adapter, pin, mask = _pin_below_a_thinned_tail(scales_out)
+
+    with pytest.raises(ValueError, match=message):
+        adapter.condition(pin, mask)
+
+
+def test_a_far_pin_whose_squared_distance_fits_float32_still_conditions() -> None:
+    """A pin a thousand anchor scales into a thinned tail gives a finite conditional."""
+    adapter, pin, mask = _pin_below_a_thinned_tail(1e3)
+
+    reduced = adapter.condition(pin, mask)
+
+    for name, value in reduced.params.items():
+        assert bool(torch.isfinite(value).all()), name
+    assert np.isfinite(reduced.mean().numpy()).all()
 
 
 def _interval_request(

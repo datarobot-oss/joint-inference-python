@@ -387,6 +387,37 @@ def test_student_t_conditioning_rejects_non_positive_degrees_of_freedom() -> Non
         )
 
 
+@pytest.mark.parametrize("parameterization", ["dense", "lowrank"])
+def test_student_t_conditioning_refuses_values_whose_squared_distance_overflows(
+    parameterization: str,
+) -> None:
+    """A known value too far out for the dtype raises instead of returning non-finite weights.
+
+    float32 holds the value and the location shift it causes, but not the
+    known block's squared Mahalanobis distance, which every posterior weight
+    and every scale inflation is computed from.
+    """
+    params = student_t_pair_mixture(dtype=torch.float32)
+    covariance = (
+        MixtureCovariance(chol=params["chol"])
+        if parameterization == "dense"
+        else MixtureCovariance(
+            lowrank_diag=torch.full((1, 1, 2, 2), 0.5),
+            lowrank_U=torch.tensor([[[[[0.7], [0.4]], [[1.2], [-0.9]]]]]),
+        )
+    )
+
+    with pytest.raises(ValueError, match="too far from the mixture"):
+        condition_student_t_mixture(
+            params["logits"],
+            params["means"],
+            covariance,
+            params["df"],
+            torch.tensor([[[1e25, 0.0]]]),
+            torch.tensor([True, False]),
+        )
+
+
 def test_student_t_conditioning_rejects_a_mismatched_degrees_of_freedom_shape() -> None:
     """``df`` must carry one value per component on the logits' leading axes.
 

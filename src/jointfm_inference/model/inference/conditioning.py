@@ -511,7 +511,10 @@ def condition_student_t_mixture(
         ValueError: when ``df`` does not carry one value per component on the
             same leading axes as ``logits``, or when it is not strictly
             positive, which would make the marginal t-density of the known
-            block undefined.
+            block undefined; or when the known values lie so far from a
+            component that the known block's squared Mahalanobis distance is
+            not finite in the parameters' dtype, which every posterior weight
+            and scale inflation is computed from.
     """
     if df.shape != logits.shape:
         raise ValueError(
@@ -531,6 +534,12 @@ def condition_student_t_mixture(
         return logits, means, covariance.dense_chol(), df
 
     conditional = _elliptical_conditional(flat)
+    if not bool(torch.isfinite(conditional.mahalanobis).all()):
+        raise ValueError(
+            "the known values lie too far from the mixture to condition on: the "
+            "known block's squared Mahalanobis distance is not finite in "
+            f"{conditional.mahalanobis.dtype} under at least one component"
+        )
     n_known = int(flat.idx_a.numel())
 
     log_prob_a = (
