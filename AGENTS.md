@@ -30,6 +30,7 @@ Dependencies point one way: this project depends only on public packages and nev
 - **No transient labels** — no phase, milestone, sprint, or ticket identifiers in docstrings, comments, help strings, error messages, or tests. Describe the lasting behavior instead.
 - **License headers.** Every Python file starts with the Apache-2.0 header from `.licenserc.yaml`; the `insert-license` hook adds it, so never write it by hand or vary its text.
 - **Tests** are fast, run on CPU, and create any checkpoint they need instead of assuming one exists locally. When fixing a bug, add the failing test first.
+- **The client follows this service.** The request, response, health, and error payloads of `POST /predict` and `GET /healthz` are a public contract that the `jointfm-client` SDK ([joint-client-python](https://github.com/datarobot-oss/joint-client-python)) reads. A change that adds, removes, renames, or redefines a field, mode, or error code is named in `CHANGELOG.md` under the release that makes it, so the client can match it in its next release. The client's test fixtures are copies of this service's real responses, so after such a change they are captured again from a running service, never edited by hand.
 
 ## Git
 
