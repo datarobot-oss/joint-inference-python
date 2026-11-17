@@ -30,7 +30,7 @@ The repository holds the serving code for JointFM 1 checkpoints, the `jointfm-in
 
 ## Quickstart
 
-1. **Install the prerequisites:** [uv](https://docs.astral.sh/uv/) and [Task](https://taskfile.dev/). Ubuntu, Amazon Linux, and macOS are supported. Docker is needed only for the [container](#container).
+1. **Install the prerequisites:** [uv](https://docs.astral.sh/uv/) and [Task](https://taskfile.dev/). Ubuntu, Amazon Linux, and macOS are supported. Docker is needed only for the [container](#container). [Hardware](#hardware) lists the GPU, memory, and disk space the service needs.
 2. **Get a weights file.** Serving needs a JointFM serving weights file: a JointFM 1 checkpoint in the format the runner reads. How to obtain one will be documented here.
 3. **Clone the repository:**
 
@@ -53,6 +53,24 @@ The repository holds the serving code for JointFM 1 checkpoints, the `jointfm-in
    ```
 
 7. **Forecast** from Python with [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python), pointing its local selector `JOINTFM_LOCAL_BASE_URL` at `http://127.0.0.1:8080`.
+
+## Hardware
+
+These figures are for the JointFM 1 open weights at the default `bf16` precision, rounded up from our estimate for the largest request the model accepts: 100 series, 732 steps of history, and all 92 forecast steps. Smaller requests need less, and next-day forecasts need far less.
+
+**GPU.** Any NVIDIA GPU of the Ampere generation or newer with 16 GB of memory. `bf16` needs native bfloat16 support, and the service refuses to start with `bf16` on a GPU without it; there, set `JOINTFM_INFERENCE_PRECISION=fp32`, which needs more memory. GPU memory grows with the samples, forecast steps, and series a request asks for, because the model runs once per request and draws all of its samples from that run:
+
+| Samples per request (`JOINTFM_INFERENCE_MAX_SAMPLE_COUNT`) | GPU memory for the largest request |
+| --- | --- |
+| 1,000 (the default) | about 10 GB |
+| 5,000 | about 12 GB |
+| 20,000 | about 20 GB |
+
+With `JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS` above 1, each concurrent request needs that much again, apart from the roughly 2 GB of weights and CUDA context they share.
+
+**RAM.** About 4 GB when the model runs on a GPU, plus about 20 bytes for every value a response returns (samples × forecast steps × series), so about 8 GB for 20,000 samples of the largest request. On the CPU, the model itself runs in RAM: plan for about 16 GB at 1,000 samples and about 32 GB at 20,000.
+
+**Disk.** About 0.7 GB for the weights; a download is written next to the file before it replaces it, so replacing a file briefly needs twice that. About 6 GB for the Python environment `task serve` creates on Linux, most of it PyTorch with its CUDA libraries, and about as much again for the [container](#container) image.
 
 ## Configuration
 
