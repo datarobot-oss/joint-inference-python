@@ -61,8 +61,11 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | `task release` | Cut a release: bump the version, write `CHANGELOG.md`, commit, and tag |
 | `task release:publish` | Push the release commit and its tag to `origin` |
 
-Every task prints an `OK:` or `FAIL:` line. CI runs `task pre-commit` and `task build` on Ubuntu
-and macOS; the macOS job skips the license header hook because its runners have no docker.
+Every task prints an `OK:` or `FAIL:` line. CI runs the same checks as `task pre-commit`, each as
+its own job named for what it checks, plus `task build`. Only the unit tests run on both Ubuntu and
+macOS; every other check gives the same answer on either platform. The ruleset requires the
+`CI passed` job, which fails when any CI job fails, so adding or renaming a job needs no ruleset
+change.
 
 ## Package layout
 

@@ -1,3 +1,6 @@
+# One job per check, so a red check names what failed. Only the unit tests run
+# on both platforms: every other check reads files or types and gives the same
+# answer on either.
 name: CI
 
 on:
@@ -13,8 +16,77 @@ permissions:
     contents: read
 
 jobs:
-    pre-commit:
-        name: task pre-commit (${{ matrix.os }})
+    lint:
+        name: Lint (ruff)
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+              with:
+                  dependencies: dev
+            - run: task lint
+
+    format:
+        name: Format (ruff)
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+              with:
+                  dependencies: dev
+            - run: task format:check
+
+    types:
+        name: Types (ty)
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+              with:
+                  dependencies: project
+            - run: task typecheck
+
+    spelling:
+        name: Spelling (typos)
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+              with:
+                  dependencies: none
+            - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+              with:
+                  tool: typos-cli@1.45.1
+            - run: task typos
+
+    license-headers:
+        name: License headers
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+              with:
+                  dependencies: none
+            - run: task license-check
+
+    openapi:
+        name: OpenAPI contract is current
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+              with:
+                  dependencies: project
+            - run: task schema:check
+
+    tests:
+        name: Unit tests (${{ matrix.os }})
         runs-on: ${{ matrix.os }}
         timeout-minutes: 30
         strategy:
@@ -22,106 +94,86 @@ jobs:
             matrix:
                 os: [ubuntu-latest, macos-latest]
         steps:
-            - name: Checkout
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-            - name: Install Task
-              uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
               with:
-                  version: 3.x
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+                  dependencies: project
+            - run: task coverage
 
-            - name: Install uv with cache
-              uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+    build:
+        name: Build package
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
               with:
-                  version: "0.10.12"
-                  python-version: "3.13.3"
-                  enable-cache: true
-                  cache-dependency-glob: |
-                      uv.lock
-                      pyproject.toml
+                  dependencies: none
+            - run: task build
 
-            - name: Cache pre-commit environments
-              uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    leak-guard:
+        name: Leak guard
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+            - uses: ./.github/actions/setup
+              with:
+                  dependencies: dev
+            - name: Scan the working tree
+              run: task leak-guard
+            - name: Scan every reachable commit
+              run: task leak-guard:history
+
+    secret-scan:
+        name: Secret scan (gitleaks)
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+            - uses: ./.github/actions/setup
+              with:
+                  dependencies: dev
+            - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
               with:
                   path: ~/.cache/pre-commit
                   key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
                   restore-keys: |
                       pre-commit-${{ runner.os }}-
-
-            - name: Install typos CLI
-              uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
-              with:
-                  tool: typos-cli@1.45.1
-
-            - name: Sync project dependencies
-              run: uv sync --locked --all-groups
-
-            # macOS runners ship without docker, which the skywalking-eyes
-            # hook needs; the Ubuntu job checks the license headers.
-            # backward-compatibility runs in its own workflow so its failure is named.
-            - name: Run task pre-commit
-              env:
-                  SKIP: ${{ runner.os == 'macOS' && 'insert-license,backward-compatibility' || 'backward-compatibility' }}
-              run: task pre-commit
-
-            - name: Build distribution
-              run: task build
-
-    leak-guard-history:
-        name: task leak-guard:history
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        steps:
-            - name: Checkout with full history
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  fetch-depth: 0
-
-            - name: Install Task
-              uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
-              with:
-                  version: 3.x
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-            - name: Install uv with cache
-              uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-              with:
-                  version: "0.10.12"
-                  python-version: "3.13.3"
-                  enable-cache: true
-                  cache-dependency-glob: |
-                      uv.lock
-                      pyproject.toml
-
-            - name: Scan every reachable commit
-              run: task leak-guard:history
-
-    secret-scan-history:
-        name: task secret-scan:history
-        runs-on: ubuntu-latest
-        timeout-minutes: 10
-        steps:
-            - name: Checkout with full history
-              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                  fetch-depth: 0
-
-            - name: Install Task
-              uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
-              with:
-                  version: 3.x
-                  repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-            - name: Install uv with cache
-              uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-              with:
-                  version: "0.10.12"
-                  python-version: "3.13.3"
-                  enable-cache: true
-                  cache-dependency-glob: |
-                      uv.lock
-                      pyproject.toml
-
             - name: Scan every reachable commit for secrets
               run: task secret-scan:history
+
+    # The one check the ruleset requires from this workflow, so adding or
+    # renaming a job above never leaves a required check pending forever.
+    ci-passed:
+        name: CI passed
+        if: always()
+        needs:
+            - lint
+            - format
+            - types
+            - spelling
+            - license-headers
+            - openapi
+            - tests
+            - build
+            - leak-guard
+            - secret-scan
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Require every check to pass
+              env:
+                  RESULTS: ${{ join(needs.*.result, ' ') }}
+              run: |
+                  for result in $RESULTS; do
+                      if [ "$result" != "success" ]; then
+                          echo "::error::A check failed or was skipped; see the named checks on this run."
+                          exit 1
+                      fi
+                  done
+                  echo "OK: every check passed"
