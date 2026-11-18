@@ -59,9 +59,10 @@ jobs:
 
             # macOS runners ship without docker, which the skywalking-eyes
             # hook needs; the Ubuntu job checks the license headers.
+            # backward-compatibility runs in its own workflow so its failure is named.
             - name: Run task pre-commit
               env:
-                  SKIP: ${{ runner.os == 'macOS' && 'insert-license' || '' }}
+                  SKIP: ${{ runner.os == 'macOS' && 'insert-license,backward-compatibility' || 'backward-compatibility' }}
               run: task pre-commit
 
             - name: Build distribution

@@ -37,6 +37,7 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | `task run -- <command>` | Run a command inside the project environment |
 | `task test` | Run the unit tests |
 | `task coverage` | Run the unit tests and enforce the coverage floor |
+| `task test:compatibility` | Check that every released JointFM 1 checkpoint layout still loads and predicts the same; CI runs it as the Backward compatibility check |
 | `task check` | Read-only static checks: typos, Ruff lint and format check, ty, OpenAPI document check |
 | `task license-check` | Fail when a Python file lacks the license header (needs docker) |
 | `task license-fix` | Add the license header to every Python file that lacks it (needs docker) |
@@ -93,11 +94,33 @@ layout, is refused before a backend is resolved:
 marker to a serving backend through the `jointfm_inference.backends` entry-point group and fails
 at load when no installed distribution registers it. This distribution registers `jointfm-1`.
 
-The format version covers this mapping, not the network inside it: the parameter names and shapes
-of `model_state` belong to the generation's network, which loads them with `strict=True`. A state
-dict written for another layout of that network is refused at load with an error that names every
-missing, unexpected, and reshaped parameter. The JointFM 1 network holds no parameter indexed by a
-column's position, so permuting a request's columns permutes every per-column output.
+The format version covers this mapping and the network inside it: the parameter names, shapes, and
+meaning of `model_state` are part of the format, and the network loads them with `strict=True`. The
+JointFM 1 network holds no parameter indexed by a column's position, so permuting a request's
+columns permutes every per-column output.
+
+### Compatibility of released exports
+
+JointFM 1 is released, and people hold its serving exports. Every change keeps each released export
+loading and predicting as it did, and keeps each documented request working. A new setting or
+parameter is optional, and an export without it behaves as before.
+
+A change that cannot keep a released export loading is a deprecation, not a refactor. It needs:
+
+- the maintainers' approval before it merges;
+- a higher `CHECKPOINT_FORMAT_VERSION`, so the exports it drops are told apart by their version;
+- a refusal of the retired version, raised before any parameter is loaded, that names the file's
+  version, the versions this runner reads, and what the holder does next;
+- a notice in `CHANGELOG.md` at least 90 days before the release that drops support.
+
+One layout was dropped before this policy: exports written for `v0.2.0` and earlier do not load
+from `v0.3.0` on, and are refused with the strict-load error that names their parameters.
+
+`tests/compatibility/` holds a tiny synthetic export of each released layout, written by the release
+that introduced it and never regenerated, and the tests that load them. They run as the separate
+**Backward compatibility** check (`task test:compatibility`), which fails when a supported export
+stops loading or predicts differently, and when a layout is retired without a version bump. Its
+README says how to freeze a new layout.
 
 ## Keeping the repository publishable
 

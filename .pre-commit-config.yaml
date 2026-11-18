@@ -72,3 +72,10 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # CI skips this hook and runs it as the Backward compatibility workflow.
+      - id: backward-compatibility
+        name: backward compatibility of released JointFM 1 checkpoints
+        entry: task test:compatibility
+        language: system
+        pass_filenames: false
+        always_run: true
