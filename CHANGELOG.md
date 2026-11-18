@@ -1,3 +1,9 @@
+## v0.8.0 (2026-11-18)
+
+### Feat
+
+- Bound request bodies by a max_request_bytes cap that /healthz reports, refusing a larger or negative Content-Length before reading and a stalled body with 408, generate an OpenAPI 3.1 document of the HTTP contract with jointfm-inference schema, and carry requested and allowed on INPUT_SIZE_EXCEEDED errors
+
 ## v0.7.1 (2026-11-14)
 
 ### Fix
