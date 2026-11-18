@@ -101,9 +101,7 @@ def test_a_released_checkpoint_still_loads(layout: str) -> None:
 @pytest.mark.parametrize("layout", sorted(SUPPORTED))
 def test_a_released_checkpoint_still_predicts_what_it_did(layout: str) -> None:
     model, _ = load_model_from_checkpoint(_checkpoint(layout))
-    frozen = torch.load(
-        CHECKPOINTS / f"{layout}{OUTPUTS_SUFFIX}.pt", weights_only=True
-    )
+    frozen = torch.load(CHECKPOINTS / f"{layout}{OUTPUTS_SUFFIX}.pt", weights_only=True)
 
     with torch.no_grad():
         outputs = model(frozen["past"], frozen["horizons"])
