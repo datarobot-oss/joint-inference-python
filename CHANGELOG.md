@@ -42,6 +42,10 @@
 
 ## v0.3.0 (2026-11-06)
 
+### BREAKING CHANGE
+
+- JointFM 1 checkpoints exported for `v0.2.0` and earlier no longer load. They still carry format version 1, so the load fails on their parameter names and shapes. Re-export the checkpoint, or serve it with `v0.2.0`.
+
 ### Feat
 
 - add release management tasks and update pyproject.toml for changelog handling (#23)

@@ -19,7 +19,8 @@ Dependencies point one way: this project depends only on public packages and nev
 
 ## Engineering
 
-- **Fail fast.** No silent fallbacks, no compatibility paths, no deprecation flags, no `try/except` that swallows or rewrites errors. Exceptions are for IO and races; otherwise re-raise.
+- **Fail fast.** No silent fallbacks and no `try/except` that swallows or rewrites errors. Exceptions are for IO and races; otherwise re-raise.
+- **Released exports keep working.** Every released JointFM 1 checkpoint keeps loading and predicting as it did, and every documented request keeps working. Code that keeps an older layout loading is required, not a fallback. A change that cannot keep one working is a deprecation and follows "Compatibility of released exports" in [CONTRIBUTING.md](CONTRIBUTING.md); never retire one on your own.
 - **Ground in facts.** Before planning, claiming, or editing, read the relevant source, configuration, docs, and test output, and act only on beliefs backed by something just read or run.
 - **Commands.** Run ad-hoc Python and CLI commands through `task run -- <command>`, never bare `python` or hand-written `uv run`, so no invocation re-resolves the `.venv` or `uv.lock` by accident. Explain in one sentence what each command does and why before running it.
 - **Taskfile targets** print an explicit `OK:` or `FAIL:` line; success is never inferred from silence.
