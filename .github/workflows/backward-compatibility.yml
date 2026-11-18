@@ -1,0 +1,61 @@
+# Its own workflow so a broken released checkpoint fails a check named for it.
+# No paths filter: a required check must start on every pull request.
+name: Backward compatibility
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+concurrency:
+    group: backward-compatibility-${{ github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+    contents: read
+
+jobs:
+    jointfm-1-checkpoints:
+        name: Released JointFM 1 checkpoints still load
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Checkout
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+            - name: Install Task
+              uses: arduino/setup-task@c0bc642852239c2689f73f4ea6459c29405f3c52 # v3.0.0
+              with:
+                  version: 3.x
+                  repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Install uv with cache
+              uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+              with:
+                  version: "0.10.12"
+                  python-version: "3.13.3"
+                  enable-cache: true
+                  cache-dependency-glob: |
+                      uv.lock
+                      pyproject.toml
+
+            - name: Sync project dependencies
+              run: uv sync --locked --all-groups
+
+            - name: Load and predict with every released checkpoint layout
+              run: task test:compatibility
+
+            - name: Explain the failure
+              if: failure()
+              run: |
+                  echo "::error title=Backward compatibility broken::This change stops a released JointFM 1 checkpoint from loading or changes what it predicts. See tests/compatibility/README.md."
+                  {
+                      echo "## Backward compatibility broken"
+                      echo
+                      echo "This change stops a JointFM 1 checkpoint that people hold from loading, or changes what it predicts."
+                      echo
+                      echo "- Do not regenerate the frozen checkpoints or edit the expected outputs to make this pass."
+                      echo "- Keep the old layout loading, or treat the change as a deprecation: it needs the maintainers' approval, a higher \`CHECKPOINT_FORMAT_VERSION\`, a clear refusal, and notice."
+                      echo
+                      echo "Details: \`tests/compatibility/README.md\` and \"Compatibility of released exports\" in \`CONTRIBUTING.md\`."
+                  } >> "$GITHUB_STEP_SUMMARY"
