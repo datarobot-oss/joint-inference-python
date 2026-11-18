@@ -16,9 +16,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Sequence
 from http import HTTPStatus
-from typing import Any, Final, cast
+from typing import Any, cast
 
 from jointfm_inference.data.adapters import ColumnSpec
 from jointfm_inference.data.types import ROLES, RoleLiteral
@@ -31,48 +31,12 @@ from .validation import (
     _require_sequence,
     _require_string,
 )
-
-
-# Every key a column descriptor may carry. A key outside this set is refused:
-# reading only known keys would drop an unknown one, such as a misspelled
-# option, without telling the caller.
-COLUMN_DESCRIPTOR_FIELDS: frozenset[str] = frozenset(
-    {
-        "name",
-        "modality",
-        "role",
-        "nullable",
-        "vocabulary_size",
-        "level_count",
-        "mapping",
-        "lower_bound",
-        "upper_bound",
-        "time_value_kind",
-        "time_value_scale_seconds",
-        "time_value_use_local_normalized_time",
-        "time_value_calendar_id",
-        "time_value_timezone",
-        "traits",
-    }
+from .wire_schema import (
+    COLUMN_DESCRIPTOR_FIELD_NAMES,
+    DEFAULT_ONLY_DESCRIPTOR_VALUES,
+    DEFAULT_ROLE,
+    SERVED_MODALITY,
 )
-
-SERVED_MODALITY: Final = "numeric"
-DEFAULT_CALENDAR_ID: Final = "pandas-default"
-
-# Descriptor fields the service accepts only at their default value, with the
-# defaults that pass. A missing key always passes.
-_DEFAULT_ONLY_FIELDS: Final[Mapping[str, Collection[Any]]] = {
-    "nullable": (False,),
-    "vocabulary_size": (),
-    "level_count": (),
-    "mapping": (),
-    "time_value_kind": (),
-    "time_value_scale_seconds": (),
-    "time_value_use_local_normalized_time": (False,),
-    "time_value_calendar_id": (DEFAULT_CALENDAR_ID,),
-    "time_value_timezone": (),
-    "traits": ({},),
-}
 
 
 def _refuse(message: str, *, field: str) -> ServiceError:
@@ -87,7 +51,9 @@ def _parse_column_specs(raw_columns: Sequence[Any]) -> list[ColumnSpec]:
 
     The service serves numeric columns: ``modality`` must be ``numeric``,
     ``role`` ``target`` or ``feature``, and every field of
-    ``_DEFAULT_ONLY_FIELDS`` absent or at its default.
+    ``DEFAULT_ONLY_DESCRIPTOR_VALUES`` absent, ``null``, or at a value it
+    lists. A key outside ``COLUMN_DESCRIPTOR_FIELD_NAMES`` is refused, since
+    reading only known keys would drop a misspelled option silently.
 
     Raises:
         ServiceError: ``VALIDATION_ERROR`` for an unknown key, a missing name
@@ -97,11 +63,11 @@ def _parse_column_specs(raw_columns: Sequence[Any]) -> list[ColumnSpec]:
     for idx, raw_column in enumerate(raw_columns):
         field = f"columns[{idx}]"
         column = _require_mapping(raw_column, field=field)
-        unknown_fields = sorted(set(map(str, column)) - COLUMN_DESCRIPTOR_FIELDS)
+        unknown_fields = sorted(set(map(str, column)) - COLUMN_DESCRIPTOR_FIELD_NAMES)
         if unknown_fields:
             raise _refuse(
                 f"{field} has unknown fields {unknown_fields}; "
-                f"expected a subset of {sorted(COLUMN_DESCRIPTOR_FIELDS)}",
+                f"expected a subset of {sorted(COLUMN_DESCRIPTOR_FIELD_NAMES)}",
                 field=field,
             )
         name = _require_string(column.get("name"), field=f"{field}.name")
@@ -112,13 +78,15 @@ def _parse_column_specs(raw_columns: Sequence[Any]) -> list[ColumnSpec]:
                 f"{SERVED_MODALITY!r} columns only",
                 field=f"{field}.modality",
             )
-        role = _optional_string(column.get("role"), field=f"{field}.role") or "feature"
+        role = (
+            _optional_string(column.get("role"), field=f"{field}.role") or DEFAULT_ROLE
+        )
         if role not in ROLES:
             raise _refuse(
                 f"{field}.role {role!r} is not served; expected one of {sorted(ROLES)}",
                 field=f"{field}.role",
             )
-        for key, defaults in _DEFAULT_ONLY_FIELDS.items():
+        for key, defaults in DEFAULT_ONLY_DESCRIPTOR_VALUES.items():
             value = column.get(key)
             # A type match keeps 0 from passing as False.
             if value is not None and not any(

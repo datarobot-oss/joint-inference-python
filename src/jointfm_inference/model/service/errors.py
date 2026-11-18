@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
 
 
@@ -37,6 +38,15 @@ class ServiceErrorCode(StrEnum):
     INTERNAL_ERROR = "INTERNAL_ERROR"
 
 
+# The values an error object of each code carries as fields beside its
+# message, so a client reads them instead of parsing the message text. A code
+# not listed carries none. Each value is in the unit of the error's ``field``:
+# a sample count for ``n_samples``, a byte count for ``Content-Length``.
+ERROR_VALUE_FIELDS: Mapping[ServiceErrorCode, tuple[str, ...]] = {
+    ServiceErrorCode.INPUT_SIZE_EXCEEDED: ("requested", "allowed"),
+}
+
+
 class ServiceError(Exception):
     """Request or startup error with an explicit API-facing code."""
 
@@ -47,17 +57,32 @@ class ServiceError(Exception):
         *,
         status: int,
         field: str | None = None,
+        values: Mapping[str, int] | None = None,
     ) -> None:
         """Initialize one API-facing error with its HTTP and field metadata.
 
+        ``values`` holds exactly the value fields ``ERROR_VALUE_FIELDS`` names
+        for ``code``; the error object on the wire carries them beside the
+        message.
+
         Raises:
-            ValueError: when ``code`` is outside the enumerated catalog, which
-                is a programming error rather than a request error: an
+            ValueError: when ``code`` is outside the enumerated catalog, or
+                ``values`` does not hold exactly the code's value fields. Both
+                are programming errors rather than request errors: an
                 unenumerated code would reach a client that cannot branch on
-                it.
+                it, and a missing value would break the documented contract.
         """
         super().__init__(message)
-        self.code = ServiceErrorCode(code).value
+        error_code = ServiceErrorCode(code)
+        carried = {} if values is None else dict(values)
+        expected = ERROR_VALUE_FIELDS.get(error_code, ())
+        if set(carried) != set(expected):
+            raise ValueError(
+                f"a {error_code.value} error carries exactly the values "
+                f"{list(expected)}, got {sorted(carried)}"
+            )
+        self.code = error_code.value
         self.message = message
         self.status = status
         self.field = field
+        self.values = carried

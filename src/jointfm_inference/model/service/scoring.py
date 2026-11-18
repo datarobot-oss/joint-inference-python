@@ -68,6 +68,7 @@ def _resolve_sample_count(
             ),
             status=HTTPStatus.BAD_REQUEST,
             field="n_samples",
+            values={"requested": raw_n_samples, "allowed": config.max_sample_count},
         )
     return raw_n_samples
 

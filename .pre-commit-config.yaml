@@ -57,6 +57,15 @@ repos:
         entry: task typos
         language: system
         pass_filenames: false
+      # Rewrites a stale OpenAPI document; pre-commit fails a hook that changes
+      # files, so the commit stops until the rewritten copy is staged, and CI
+      # fails on a stale committed copy.
+      - id: openapi-schema
+        name: regenerate the OpenAPI document
+        entry: task schema
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: tests
         name: tests with coverage
         entry: task coverage

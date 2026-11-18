@@ -91,12 +91,19 @@ With the [DataRobot CLI](https://github.com/datarobot-oss/cli), `task start` (or
 | `JOINTFM_INFERENCE_BIND_HOST` | `0.0.0.0` | Address the service listens on |
 | `JOINTFM_INFERENCE_PORT` | `8080` | Port the service listens on |
 | `JOINTFM_INFERENCE_MAX_SAMPLE_COUNT` | `1000` | Largest sample count one request may ask for |
+| `JOINTFM_INFERENCE_MAX_REQUEST_BYTES` | admits a request at every limit of the checkpoint's capacity envelope | Largest request body read, which `/healthz` reports as `max_request_bytes`; a larger one is refused unread with HTTP 413 and `INPUT_SIZE_EXCEEDED`. The default budgets each value at full float64 precision keyed by a column name of up to 64 bytes, so raise it for longer names |
 | `JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS` | `1` | Prediction requests run at the same time; raise it only as far as the largest requests fit the device together |
 | `JOINTFM_INFERENCE_MODEL_VERSION` | `jointfm-inference:<version>+ckpt.<checkpoint version>` | Model version `/healthz` reports; a request that names a model version must match it |
+
+A connection that sends or accepts no byte for 60 seconds is closed, a stalled request body with HTTP 408, so a stalled client cannot hold a server thread.
 
 `jointfm-inference probe --service-url URL` (repeatable) checks each service's health and requests every return mode it advertises; `task probe` probes the local service, and `task probe -- --service-url URL` any others.
 
 `jointfm-inference profile` shows where a request's time goes. It loads the checkpoint that the same settings configure into its own process, answers synthetic forecast requests one at a time without HTTP, over a grid of column counts (`--columns`), sample counts (`--samples`), and return modes (`--return-modes`), and prints a Markdown table of median milliseconds per stage: preparation, the network forward (encoder, then pooling and head), the read-out (for samples: Cholesky factorization, Gaussian draws, Gamma draws, and assembly), serialization, and JSON encoding, next to the end-to-end time with the stage timers off. `--output FILE` also writes every timing as JSON, and `task profile -- <options>` runs it from `.env`. Profile on a device no other process uses: a timer waits for all work on its device, so other work there lands in the stages. Library code turns the same timers on with `jointfm_inference.core.timing.set_enabled(True)`.
+
+## HTTP API
+
+The service answers `GET /healthz` and `POST /predict`. [openapi.json](src/jointfm_inference/model/service/wire_schema/openapi.json) is their [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document: every request, response, health, and error field with its type and meaning, and one example request per query mode and return mode. The service's own code generates it, so it cannot drift from what the service accepts and sends: `jointfm-inference schema` writes it, a commit hook rewrites a stale copy and stops the commit until the rewritten one is staged, and the package ships it as data, so every release tag carries the document of the contract that release serves. Its `info.version` is the `schema_version` every prediction request sends.
 
 ## Container
 

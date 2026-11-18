@@ -14,6 +14,8 @@ vars:
   # Starting an xdist worker imports torch, so beyond a few workers
   # startup outweighs the parallel test time.
   TEST_MAX_WORKERS: '{{.TEST_MAX_WORKERS | default "8"}}'
+  # The committed OpenAPI document, shipped as package data.
+  OPENAPI_PATH: src/jointfm_inference/model/service/wire_schema/openapi.json
   # Shared opening of every deploy:* target: install the Pulumi program's
   # dependencies and select (or create) the stack .env names.
   DEPLOY_STACK_SETUP: |
@@ -163,6 +165,26 @@ tasks:
         exit 1
       fi
 
+  schema:
+    desc: Regenerate the committed OpenAPI document of the service's HTTP contract from the code
+    cmd: |
+      if uv run jointfm-inference schema --output {{.OPENAPI_PATH}}; then
+        echo "OK: wrote {{.OPENAPI_PATH}}"
+      else
+        echo "FAIL: could not write {{.OPENAPI_PATH}}"
+        exit 1
+      fi
+
+  schema:check:
+    desc: Fail when the committed OpenAPI document differs from the one the code generates
+    cmd: |
+      if uv run jointfm-inference schema --check --output {{.OPENAPI_PATH}}; then
+        echo "OK: {{.OPENAPI_PATH}} is current"
+      else
+        echo "FAIL: {{.OPENAPI_PATH}} is stale; regenerate it with task schema"
+        exit 1
+      fi
+
   secret-scan:history:
     desc: Fail when any commit reachable from any ref carries a credential, scanned by gitleaks
     cmd: |
@@ -224,6 +246,7 @@ tasks:
       - task: lint
       - task: format:check
       - task: typecheck
+      - task: schema:check
       - cmd: 'echo "OK: all static checks passed"'
 
   release:require-tag:

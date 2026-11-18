@@ -12,27 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ``jointfm-inference`` command: ``serve``, ``probe``, and ``profile``.
+"""The ``jointfm-inference`` command: ``serve``, ``probe``, ``profile``, ``schema``.
 
 ``serve`` takes no options: every setting is a ``JOINTFM_INFERENCE_*``
 environment variable (``jointfm_inference.model.service.config``), so a local
 process and a container read the same configuration file. ``profile`` loads
-the checkpoint from the same settings.
+the checkpoint from the same settings. ``schema`` writes the OpenAPI document
+of the HTTP contract, which needs no checkpoint.
 """
 
 from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from pathlib import Path
 
 from jointfm_inference.model import probe, profile
-from jointfm_inference.model.service import server
+from jointfm_inference.model.service import server, wire_schema
 
 SERVE_DESCRIPTION = (
     "Serve one JointFM checkpoint over HTTP. Configured entirely through "
     "JOINTFM_INFERENCE_* environment variables; JOINTFM_INFERENCE_CHECKPOINT_PATH "
     "is required, and JOINTFM_INFERENCE_CHECKPOINT_VERSION defaults to the start "
     "of the checkpoint's SHA-256 digest."
+)
+SCHEMA_DESCRIPTION = (
+    "Write the OpenAPI 3.1 document of the service's HTTP contract, generated "
+    "from the service's own code. With --check, write nothing and fail when the "
+    "file at --output differs from the document."
 )
 
 
@@ -42,13 +49,34 @@ def _serve(arguments: argparse.Namespace) -> None:
     server.main()
 
 
+def _schema(arguments: argparse.Namespace) -> None:
+    """Write the OpenAPI document to ``--output``, or check that file with ``--check``.
+
+    Raises:
+        SystemExit: under ``--check``, when the file is missing or differs
+            from the document the code generates.
+    """
+    output = Path(arguments.output)
+    document = wire_schema.render_openapi()
+    if arguments.check:
+        if not output.is_file() or output.read_text(encoding="utf-8") != document:
+            raise SystemExit(
+                f"{output} is not the OpenAPI document the code generates; "
+                f"rewrite it with: jointfm-inference schema --output {output}"
+            )
+        print(f"{output} matches the generated OpenAPI document")
+        return
+    output.write_text(document, encoding="utf-8")
+    print(f"wrote {output}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Return the parser of the ``jointfm-inference`` command and its subcommands."""
     parser = argparse.ArgumentParser(
         prog="jointfm-inference",
         description=(
-            "Serve JointFM checkpoints, probe running services, and profile "
-            "served-request latency."
+            "Serve JointFM checkpoints, probe running services, profile "
+            "served-request latency, and write the service's OpenAPI document."
         ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -70,6 +98,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     profile.add_arguments(profile_parser)
     profile_parser.set_defaults(handler=profile.run)
+    schema_parser = commands.add_parser(
+        "schema",
+        help="Write the OpenAPI document of the HTTP contract",
+        description=SCHEMA_DESCRIPTION,
+    )
+    schema_parser.add_argument(
+        "--output",
+        default=wire_schema.OPENAPI_FILE_NAME,
+        help="The file to write or check (default: %(default)s)",
+    )
+    schema_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Write nothing; fail when the file differs from the document",
+    )
+    schema_parser.set_defaults(handler=_schema)
     return parser
 
 

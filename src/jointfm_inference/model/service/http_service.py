@@ -57,21 +57,12 @@ from jointfm_inference.model.inference.conditional_query import (
 from jointfm_inference.model.inference.contract import ConditionalDistributionResult
 
 from .column_specs import (
-    DEFAULT_CALENDAR_ID,
     ColumnSpec,
     _parse_column_specs,
     _resolve_requested_columns,
 )
 from .conditions import parse_conditions, supported_condition_kinds
-from .config import InferenceServiceConfig
-from .constants import (
-    HEALTH_REQUEST_TYPE,
-    PREDICT_REQUEST_TYPE,
-    QUERY_MODE_CONDITION,
-    QUERY_MODE_FORECAST,
-    REQUEST_FIELDS,
-    SUPPORTED_REQUEST_TYPES,
-)
+from .config import InferenceServiceConfig, default_max_request_bytes
 from .data_frames import _history_frame, _log_prob_values_tensor, _query_rows_frame
 from .errors import ServiceError, ServiceErrorCode
 from .scoring import (
@@ -96,6 +87,17 @@ from .validation import (
     _require_sequence,
     _require_string,
 )
+from .wire_schema import (
+    DEFAULT_CALENDAR_ID,
+    DEFAULT_QUERY_MODE,
+    DEFAULT_REQUEST_TYPE,
+    DEFAULT_RETURN_MODE,
+    QUERY_MODE_CONDITION,
+    QUERY_MODE_FORECAST,
+    REQUEST_FIELDS,
+    REQUEST_TYPE_HEALTH,
+    REQUEST_TYPES,
+)
 
 
 class JointFMHTTPService:
@@ -109,7 +111,9 @@ class JointFMHTTPService:
         """Bind validated runtime config and model session to the HTTP transport.
 
         The served capabilities are read once here from the session's
-        serving backend, which is fixed for the session's lifetime.
+        serving backend, which is fixed for the session's lifetime, and so is
+        the request cap: ``config.max_request_bytes``, or the default rule
+        applied to the session's capacity envelope when that is ``None``.
 
         Raises:
             ValueError: If ``config.precision`` disagrees with the precision
@@ -147,6 +151,17 @@ class JointFMHTTPService:
         self._concurrency_semaphore = threading.BoundedSemaphore(
             value=config.max_concurrent_requests,
         )
+        if config.max_request_bytes is None:
+            self._max_request_bytes = default_max_request_bytes(
+                session.capacity_envelope
+            )
+        else:
+            self._max_request_bytes = config.max_request_bytes
+
+    @property
+    def max_request_bytes(self) -> int:
+        """Largest request body, in bytes, that the HTTP handler reads."""
+        return self._max_request_bytes
 
     def health_payload(self) -> dict[str, Any]:
         """Return readiness metadata for the mounted-checkpoint runtime.
@@ -156,6 +171,8 @@ class JointFMHTTPService:
         model's ``decoding_strategy``, and the per-column ``tail_map`` its
         head applies (``'none'`` without one). ``supported_metadata_traits``
         lists the expert-hint traits a column descriptor may carry.
+        ``max_request_bytes`` is the largest request body the service reads,
+        so a client can check a request's size before uploading it.
         """
         time_index_support = self._session.time_index_support
 
@@ -179,6 +196,7 @@ class JointFMHTTPService:
             "supported_time_index_modes": sorted(self._serviceable_time_index_modes),
             "time_index_encoding": time_index_support.encoding,
             "max_sample_count": self._config.max_sample_count,
+            "max_request_bytes": self._max_request_bytes,
             "max_concurrent_requests": self._config.max_concurrent_requests,
             "data_generation": self._session.capacity_envelope.to_payload(),
         }
@@ -224,15 +242,15 @@ class JointFMHTTPService:
         memory of an encoded response is bounded by ``max_concurrent_requests``
         exactly like the device memory of the forecast that produced it.
         """
-        request_type = request_payload.get("request_type", PREDICT_REQUEST_TYPE)
-        if request_type == HEALTH_REQUEST_TYPE:
+        request_type = request_payload.get("request_type", DEFAULT_REQUEST_TYPE)
+        if request_type == REQUEST_TYPE_HEALTH:
             return encode_response(self.health_payload())
-        if request_type not in SUPPORTED_REQUEST_TYPES:
+        if request_type not in REQUEST_TYPES:
             raise ServiceError(
                 "VALIDATION_ERROR",
                 (
                     "Unsupported request_type: expected one of "
-                    f"{sorted(SUPPORTED_REQUEST_TYPES)}, got {request_type!r}"
+                    f"{sorted(REQUEST_TYPES)}, got {request_type!r}"
                 ),
                 status=HTTPStatus.BAD_REQUEST,
                 field="request_type",
@@ -296,7 +314,7 @@ class JointFMHTTPService:
                 field="model_version",
             )
 
-        query_mode = request_payload.get("query_mode", QUERY_MODE_FORECAST)
+        query_mode = request_payload.get("query_mode", DEFAULT_QUERY_MODE)
         if query_mode == QUERY_MODE_CONDITION and not self._supported_condition_kinds:
             raise ServiceError(
                 ServiceErrorCode.UNSUPPORTED_HEAD_QUERY_COMBINATION,
@@ -327,7 +345,7 @@ class JointFMHTTPService:
             )
 
         return_mode = _require_string(
-            request_payload.get("return_mode", "mean"),
+            request_payload.get("return_mode", DEFAULT_RETURN_MODE),
             field="return_mode",
         )
         if return_mode not in self._supported_return_modes:

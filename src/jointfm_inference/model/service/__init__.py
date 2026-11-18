@@ -18,6 +18,8 @@
 - ``http_handler`` and ``server``: the HTTP transport and process entry points.
 - ``config``: ``InferenceServiceConfig``, read from the environment.
 - ``errors``: ``ServiceError`` and its error codes.
+- ``wire_schema``: every field and vocabulary of the wire contract, and the
+  OpenAPI document generated from them.
 """
 
 from .config import InferenceServiceConfig
@@ -28,9 +30,6 @@ from .constants import (
     DEFAULT_MAX_SAMPLE_COUNT,
     DEFAULT_PORT,
     DEFAULT_SCHEMA_VERSION,
-    QUERY_MODE_CONDITION,
-    QUERY_MODE_FORECAST,
-    SUPPORTED_CONDITION_KINDS,
 )
 from .errors import ServiceError, ServiceErrorCode
 from .http_handler import JointFMRequestHandler
@@ -48,9 +47,6 @@ __all__ = [
     "InferenceServiceConfig",
     "JointFMHTTPService",
     "JointFMRequestHandler",
-    "QUERY_MODE_CONDITION",
-    "QUERY_MODE_FORECAST",
-    "SUPPORTED_CONDITION_KINDS",
     "ServiceError",
     "ServiceErrorCode",
     "create_service_from_env",

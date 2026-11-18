@@ -12,7 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""HTTP request handler bound to a configured :class:`JointFMHTTPService`."""
+"""HTTP request handler bound to a configured :class:`JointFMHTTPService`.
+
+The handler bounds what one connection can cost: a body above the service's
+``max_request_bytes`` is refused from its ``Content-Length`` before any of it
+is read, and a connection that sends or accepts no byte for
+``REQUEST_TIMEOUT_SECONDS`` is dropped, a stalled request body with a 408.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +28,11 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
-from .constants import DEFAULT_SCHEMA_VERSION
+from .constants import (
+    DEFAULT_SCHEMA_VERSION,
+    REQUEST_TIMEOUT_SECONDS,
+    RESPONSE_WRITE_CHUNK_BYTES,
+)
 from .errors import ServiceError
 from .http_service import JointFMHTTPService
 from .serialization import encode_response
@@ -33,6 +43,7 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
     """HTTP handler that delegates to a shared service instance."""
 
     service: JointFMHTTPService | None = None
+    timeout = REQUEST_TIMEOUT_SECONDS
 
     def do_GET(self) -> None:  # noqa: N802
         """Serve container health metadata from the readiness endpoint."""
@@ -65,6 +76,7 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
                 code=error.code,
                 message=error.message,
                 field=error.field,
+                values=error.values,
             )
             return
         except Exception as error:  # pragma: no cover - defensive HTTP boundary
@@ -82,7 +94,18 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
         del format, args
 
     def _read_json_body(self) -> Any:
-        """Read and decode one JSON request body from the HTTP input stream."""
+        """Read and decode one JSON request body from the HTTP input stream.
+
+        Raises:
+            ServiceError: ``VALIDATION_ERROR`` (400) on ``Content-Length`` when
+                it is missing, not an integer, or negative;
+                ``INPUT_SIZE_EXCEEDED`` (413) on ``Content-Length`` when it
+                names more than the service's ``max_request_bytes``, before
+                any body byte is read; ``VALIDATION_ERROR`` (408) on
+                ``request`` when the body stops arriving for the handler's
+                timeout; ``VALIDATION_ERROR`` (400) on ``request`` when the
+                body is not JSON.
+        """
         length_header = self.headers.get("Content-Length")
         if length_header is None:
             raise ServiceError(
@@ -101,7 +124,38 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
                 field="Content-Length",
             ) from error
 
-        raw_body = self.rfile.read(content_length)
+        if content_length < 0:
+            raise ServiceError(
+                "VALIDATION_ERROR",
+                f"Content-Length must be non-negative, got {content_length}",
+                status=HTTPStatus.BAD_REQUEST,
+                field="Content-Length",
+            )
+        max_request_bytes = _service(self).max_request_bytes
+        if content_length > max_request_bytes:
+            raise ServiceError(
+                "INPUT_SIZE_EXCEEDED",
+                (
+                    f"request body of {content_length} bytes exceeds the "
+                    f"service's max_request_bytes {max_request_bytes}; "
+                    "/healthz advertises the cap"
+                ),
+                status=HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                field="Content-Length",
+                values={"requested": content_length, "allowed": max_request_bytes},
+            )
+        try:
+            raw_body = self.rfile.read(content_length)
+        except TimeoutError as error:
+            raise ServiceError(
+                "VALIDATION_ERROR",
+                (
+                    f"request body stalled: no byte arrived for {self.timeout} s "
+                    f"of the {content_length} bytes Content-Length announced"
+                ),
+                status=HTTPStatus.REQUEST_TIMEOUT,
+                field="request",
+            ) from error
         try:
             return json.loads(raw_body.decode("utf-8"))
         except json.JSONDecodeError as error:
@@ -119,8 +173,12 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
         code: str,
         message: str,
         field: str | None = None,
+        values: Mapping[str, int] | None = None,
     ) -> None:
-        """Send a structured JSON error payload using the public API schema."""
+        """Send a structured JSON error payload using the public API schema.
+
+        ``values`` are the error's value fields, written beside its message.
+        """
         error_payload = {
             "schema_version": DEFAULT_SCHEMA_VERSION,
             "errors": [
@@ -128,6 +186,7 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
                     "code": code,
                     "message": message,
                     "field": field,
+                    **({} if values is None else values),
                 }
             ],
         }
@@ -143,7 +202,9 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        view = memoryview(body)
+        for start in range(0, len(view), RESPONSE_WRITE_CHUNK_BYTES):
+            self.wfile.write(view[start : start + RESPONSE_WRITE_CHUNK_BYTES])
 
 
 def _handler_class(service: JointFMHTTPService) -> type[JointFMRequestHandler]:

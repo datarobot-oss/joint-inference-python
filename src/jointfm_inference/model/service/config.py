@@ -34,7 +34,10 @@ from urllib.parse import urlsplit
 
 from jointfm_inference.core.version import package_version
 from jointfm_inference.model.checkpoint import file_sha256
-from jointfm_inference.model.inference import DEFAULT_INFERENCE_PRECISION
+from jointfm_inference.model.inference import (
+    DEFAULT_INFERENCE_PRECISION,
+    CapacityEnvelope,
+)
 from jointfm_inference.model.precision import MODEL_PRECISIONS
 
 from .constants import (
@@ -44,11 +47,17 @@ from .constants import (
     DEFAULT_MAX_SAMPLE_COUNT,
     DEFAULT_PORT,
     DEFAULT_SCHEMA_VERSION,
+    REQUEST_BASE_BYTES,
+    REQUEST_CELL_BYTES,
+    REQUEST_COLUMN_BYTES,
+    REQUEST_CONDITION_BYTES,
+    REQUEST_TIME_CELLS_PER_ROW,
 )
 from .errors import ServiceError
 from .validation import (
     _choice_from_env,
     _optional_env,
+    _optional_positive_int_from_env,
     _positive_int_from_env,
     _required_env,
 )
@@ -66,6 +75,7 @@ BIND_HOST_ENV = f"{ENV_PREFIX}BIND_HOST"
 PORT_ENV = f"{ENV_PREFIX}PORT"
 MAX_SAMPLE_COUNT_ENV = f"{ENV_PREFIX}MAX_SAMPLE_COUNT"
 MAX_CONCURRENT_REQUESTS_ENV = f"{ENV_PREFIX}MAX_CONCURRENT_REQUESTS"
+MAX_REQUEST_BYTES_ENV = f"{ENV_PREFIX}MAX_REQUEST_BYTES"
 MODEL_VERSION_ENV = f"{ENV_PREFIX}MODEL_VERSION"
 DOWNLOAD_URL_SCHEMES = ("https", "http")
 # A bearer token travels only over TLS.
@@ -93,6 +103,7 @@ class InferenceServiceConfig:
         model_version: str,
         max_sample_count: int,
         max_concurrent_requests: int,
+        max_request_bytes: int | None,
         checkpoint_url: str | None = None,
         checkpoint_sha256: str | None = None,
         checkpoint_token: str | None = None,
@@ -105,7 +116,11 @@ class InferenceServiceConfig:
         ``checkpoint_token`` describe where startup downloads the checkpoint to
         ``checkpoint_path`` when the file is not there yet; with no URL, the
         file must already be at ``checkpoint_path``, for example mounted into a
-        container.
+        container. ``max_request_bytes``
+        (``JOINTFM_INFERENCE_MAX_REQUEST_BYTES``) is the largest request body
+        the service reads; ``None`` lets the service apply
+        :func:`default_max_request_bytes` to the capacity envelope of the
+        checkpoint it loads.
         """
         self.checkpoint_path = checkpoint_path
         self.checkpoint_version = checkpoint_version
@@ -119,6 +134,7 @@ class InferenceServiceConfig:
         self.model_version = model_version
         self.max_sample_count = max_sample_count
         self.max_concurrent_requests = max_concurrent_requests
+        self.max_request_bytes = max_request_bytes
         self.checkpoint_url = checkpoint_url
         self.checkpoint_sha256 = checkpoint_sha256
         self.checkpoint_token = checkpoint_token
@@ -191,10 +207,38 @@ class InferenceServiceConfig:
             model_version=model_version,
             max_sample_count=max_sample_count,
             max_concurrent_requests=max_concurrent_requests,
+            max_request_bytes=_optional_positive_int_from_env(MAX_REQUEST_BYTES_ENV),
             checkpoint_url=checkpoint_url,
             checkpoint_sha256=checkpoint_sha256,
             checkpoint_token=checkpoint_token,
         )
+
+
+def default_max_request_bytes(envelope: CapacityEnvelope) -> int:
+    """Return the request cap that admits a request at every envelope limit.
+
+    The largest request a client sizes to the envelope declares
+    ``max_series`` columns, ``n_input`` history rows, and ``n_output`` query
+    times with their query rows, the rows a ``log_prob`` request scores, and
+    conditions every column at every query time on its own. Each row holds a
+    value per column and ``REQUEST_TIME_CELLS_PER_ROW`` time cells, each cell
+    takes at most ``REQUEST_CELL_BYTES`` when written at full float64
+    precision and keyed by a column name of up to
+    ``REQUEST_COLUMN_NAME_BYTES``, each conditioned cell adds
+    ``REQUEST_CONDITION_BYTES``, each column adds ``REQUEST_COLUMN_BYTES`` for
+    its descriptor, and the remaining fields share ``REQUEST_BASE_BYTES``. A
+    request with longer column names or descriptors can exceed the cap while
+    inside the envelope; ``JOINTFM_INFERENCE_MAX_REQUEST_BYTES`` raises it.
+    """
+    rows = envelope.n_input + envelope.n_output
+    cells_per_row = envelope.max_series + REQUEST_TIME_CELLS_PER_ROW
+    conditioned_cells = envelope.n_output * envelope.max_series
+    return (
+        REQUEST_BASE_BYTES
+        + envelope.max_series * REQUEST_COLUMN_BYTES
+        + rows * cells_per_row * REQUEST_CELL_BYTES
+        + conditioned_cells * REQUEST_CONDITION_BYTES
+    )
 
 
 def _checkpoint_digest(checkpoint_path: str, configured_sha256: str | None) -> str:

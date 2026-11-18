@@ -16,12 +16,10 @@
 
 from __future__ import annotations
 
-import json
 import math
 import threading
 import time
 from http import HTTPStatus
-from http.client import HTTPMessage
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,14 +35,12 @@ from jointfm_inference.model.service import (
     DEFAULT_SCHEMA_VERSION,
     InferenceServiceConfig,
     JointFMHTTPService,
-    JointFMRequestHandler,
     ServiceError,
     create_service_from_env,
     encode_response,
     serve,
 )
 from jointfm_inference.model.service.column_specs import (
-    COLUMN_DESCRIPTOR_FIELDS,
     _parse_column_specs,
     _resolve_requested_columns,
 )
@@ -55,6 +51,7 @@ from jointfm_inference.model.service.scoring import (
 )
 from jointfm_inference.model.service.serialization import _serialize_log_prob_tensor
 from jointfm_inference.model.service.time_conversion import _serialize_query_times
+from jointfm_inference.model.service.wire_schema import COLUMN_DESCRIPTOR_FIELD_NAMES
 from jointfm_inference.model.service.validation import (
     _optional_bool,
     _optional_float,
@@ -66,6 +63,12 @@ from jointfm_inference.model.service.validation import (
     _require_sequence,
     _require_string,
     _required_env,
+)
+from tests.support.http_handler import (
+    GENEROUS_REQUEST_CAP,
+    FakeHTTPHandler,
+    capped_service,
+    response_body,
 )
 from tests.support.models import tiny_model, write_checkpoint
 from jointfm_inference.model.service.config import (
@@ -331,7 +334,7 @@ def test_every_default_only_descriptor_field_has_a_refusal_case() -> None:
     """A descriptor field added later must be covered by the refusal cases below."""
     served = {"name", "modality", "role", "lower_bound", "upper_bound"}
 
-    assert set(_NON_DEFAULT_DESCRIPTOR_VALUES) == COLUMN_DESCRIPTOR_FIELDS - served
+    assert set(_NON_DEFAULT_DESCRIPTOR_VALUES) == COLUMN_DESCRIPTOR_FIELD_NAMES - served
 
 
 @pytest.mark.parametrize(
@@ -413,39 +416,18 @@ def test_parse_column_specs_refuses_malformed_descriptors(
     assert exc_info.value.field == field
 
 
-class _FakeHTTPHandler(JointFMRequestHandler):
-    """Minimal request-handler double that records response writes."""
-
-    def __init__(self) -> None:
-        self.headers = HTTPMessage()
-        self.rfile = BytesIO()
-        self.wfile = BytesIO()
-        self.path = "/"
-        self.response_codes: list[int] = []
-        self.sent_headers: list[tuple[str, str]] = []
-        self.ended = False
-
-    def send_response(self, code: int, message: str | None = None) -> None:
-        del message
-        self.response_codes.append(code)
-
-    def send_header(self, keyword: str, value: str) -> None:
-        self.sent_headers.append((keyword, value))
-
-    def end_headers(self) -> None:
-        self.ended = True
-
-
 def test_request_handler_reads_json_and_reports_decode_errors() -> None:
     """The HTTP handler should validate body length and JSON decoding."""
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
+    handler.service = capped_service(GENEROUS_REQUEST_CAP)
     raw_body = b'{"ok": true}'
     handler.headers["Content-Length"] = str(len(raw_body))
     handler.rfile = BytesIO(raw_body)
 
     assert handler._read_json_body() == {"ok": True}
 
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
+    handler.service = capped_service(GENEROUS_REQUEST_CAP)
     with pytest.raises(ServiceError, match="Content-Length header"):
         handler._read_json_body()
 
@@ -459,31 +441,27 @@ def test_request_handler_reads_json_and_reports_decode_errors() -> None:
         handler._read_json_body()
 
 
-def _response_body(handler: _FakeHTTPHandler) -> dict[str, Any]:
-    """Decode the JSON body one fake handler wrote."""
-    return json.loads(cast(BytesIO, handler.wfile).getvalue())
-
-
 def test_request_handler_sends_json_errors_and_dispatches_endpoints() -> None:
     """Handler methods should emit structured JSON for health, predict, and errors."""
     service = cast(
         JointFMHTTPService,
         SimpleNamespace(
+            max_request_bytes=GENEROUS_REQUEST_CAP,
             health_payload=lambda: {"status": "ok"},
             predict_response_bytes=lambda payload: encode_response(
                 {"echo": payload["value"]}
             ),
         ),
     )
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
     handler.service = service
 
     handler.path = "/healthz"
     handler.do_GET()
     assert handler.response_codes == [HTTPStatus.OK]
-    assert _response_body(handler) == {"status": "ok"}
+    assert response_body(handler) == {"status": "ok"}
 
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
     handler.service = service
     handler.path = "/predict"
     raw_body = b'{"value": 3}'
@@ -491,24 +469,24 @@ def test_request_handler_sends_json_errors_and_dispatches_endpoints() -> None:
     handler.rfile = BytesIO(raw_body)
     handler.do_POST()
     assert handler.response_codes == [HTTPStatus.OK]
-    assert _response_body(handler) == {"echo": 3}
+    assert response_body(handler) == {"echo": 3}
 
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
     handler.path = "/missing"
     handler.do_GET()
     assert handler.response_codes == [HTTPStatus.NOT_FOUND]
-    assert _response_body(handler)["errors"][0]["code"] == "VALIDATION_ERROR"
+    assert response_body(handler)["errors"][0]["code"] == "VALIDATION_ERROR"
 
 
 def test_request_handler_rejects_unknown_post_endpoint() -> None:
     """POST to anything but /predict must return a structured 404 error."""
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
     handler.path = "/unknown"
 
     handler.do_POST()
 
     assert handler.response_codes == [HTTPStatus.NOT_FOUND]
-    [error] = _response_body(handler)["errors"]
+    [error] = response_body(handler)["errors"]
     assert error["message"] == "Unknown endpoint: /unknown"
     assert error["code"] == "VALIDATION_ERROR"
 
@@ -517,7 +495,7 @@ def test_request_handler_suppresses_access_logging(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """The handler must not emit stdlib access logs to stderr."""
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
 
     handler.log_message("%s", "GET /healthz 200")
 
@@ -537,9 +515,13 @@ def test_request_handler_dispatches_service_errors() -> None:
             field="value",
         )
 
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
     handler.service = cast(
-        JointFMHTTPService, SimpleNamespace(predict_response_bytes=fail_predict)
+        JointFMHTTPService,
+        SimpleNamespace(
+            max_request_bytes=GENEROUS_REQUEST_CAP,
+            predict_response_bytes=fail_predict,
+        ),
     )
     handler.path = "/predict"
     raw_body = b'{"value": 3}'
@@ -549,16 +531,16 @@ def test_request_handler_dispatches_service_errors() -> None:
     handler.do_POST()
 
     assert handler.response_codes == [HTTPStatus.BAD_REQUEST]
-    assert _response_body(handler)["errors"][0]["field"] == "value"
+    assert response_body(handler)["errors"][0]["field"] == "value"
 
 
 def test_handler_class_binds_the_service_and_an_unbound_handler_fails() -> None:
     bound = _handler_class(cast(JointFMHTTPService, SimpleNamespace()))
-    handler = _FakeHTTPHandler()
+    handler = FakeHTTPHandler()
     handler.service = bound.service
     assert _service(handler) is bound.service
 
-    unbound = _FakeHTTPHandler()
+    unbound = FakeHTTPHandler()
     unbound.service = None
     with pytest.raises(RuntimeError, match="without a service"):
         _service(unbound)

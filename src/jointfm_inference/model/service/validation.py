@@ -51,7 +51,27 @@ def _optional_env(name: str) -> str | None:
 
 def _positive_int_from_env(name: str, default: int) -> int:
     """Parse one positive integer environment variable with a default fallback."""
-    raw_value = os.getenv(name, str(default))
+    return _parse_positive_int_env(name, os.getenv(name, str(default)))
+
+
+def _optional_positive_int_from_env(name: str) -> int | None:
+    """Parse one positive integer environment variable, or ``None`` when unset or empty.
+
+    For a setting whose default the caller derives from state the environment
+    does not hold.
+    """
+    raw_value = _optional_env(name)
+    if raw_value is None:
+        return None
+    return _parse_positive_int_env(name, raw_value)
+
+
+def _parse_positive_int_env(name: str, raw_value: str) -> int:
+    """Return ``raw_value`` of environment variable ``name`` as a positive int.
+
+    Raises:
+        ServiceError: The value is not an integer or not positive.
+    """
     try:
         value = int(raw_value)
     except ValueError as error:

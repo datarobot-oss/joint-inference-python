@@ -36,16 +36,16 @@ from typing import Any, Mapping, Sequence
 from jointfm_inference.model.inference.conditional_query import ConditionRequest
 
 from .column_specs import ColumnSpec
-from .constants import (
-    CONDITION_KIND_EQUALITY,
-    SUPPORTED_CONDITION_KINDS,
-)
 from .errors import ServiceError, ServiceErrorCode
+from .wire_schema import (
+    CONDITION_KIND_EQUALITY,
+    CONDITION_KINDS,
+    EQUALITY_CONDITION_FIELD_NAMES,
+    INTERVAL_CONDITION_FIELD_NAMES,
+    QUERY_TIME_INDICES_FIELD,
+)
 
 _CONDITIONS_FIELD = "conditions"
-_POSITIONS_KEY = "query_time_indices"
-_EQUALITY_KEYS = frozenset({"column", "kind", "value", _POSITIONS_KEY})
-_INTERVAL_KEYS = frozenset({"column", "kind", "lower", "upper", _POSITIONS_KEY})
 
 
 def supported_condition_kinds(*, supports_conditioning: bool) -> tuple[str, ...]:
@@ -61,7 +61,7 @@ def supported_condition_kinds(*, supports_conditioning: bool) -> tuple[str, ...]
     serving backend's ``supports_conditioning``, so a request cannot be
     accepted by a guard the advertisement disagrees with.
     """
-    return SUPPORTED_CONDITION_KINDS if supports_conditioning else ()
+    return CONDITION_KINDS if supports_conditioning else ()
 
 
 def _reject(message: str, *, field: str = _CONDITIONS_FIELD) -> ServiceError:
@@ -98,31 +98,33 @@ def _parse_positions(
     entry: Mapping[str, Any], *, label: str, query_time_count: int
 ) -> tuple[int, ...]:
     """Read the positions one condition covers, ``null`` meaning every position."""
-    if _POSITIONS_KEY not in entry:
+    if QUERY_TIME_INDICES_FIELD not in entry:
         raise _reject(
-            f"{label} must carry {_POSITIONS_KEY!r}, null for every requested "
+            f"{label} must carry {QUERY_TIME_INDICES_FIELD!r}, null for every requested "
             "future position"
         )
-    raw = entry[_POSITIONS_KEY]
+    raw = entry[QUERY_TIME_INDICES_FIELD]
     if raw is None:
         return tuple(range(query_time_count))
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-        raise _reject(f"{label}.{_POSITIONS_KEY} must be a list or null")
+        raise _reject(f"{label}.{QUERY_TIME_INDICES_FIELD} must be a list or null")
     if not raw:
         raise _reject(
-            f"{label}.{_POSITIONS_KEY} must name at least one position; null "
+            f"{label}.{QUERY_TIME_INDICES_FIELD} must name at least one position; null "
             "covers every requested future position"
         )
     for index in raw:
         if isinstance(index, bool) or not isinstance(index, int):
-            raise _reject(f"{label}.{_POSITIONS_KEY} must hold integers")
+            raise _reject(f"{label}.{QUERY_TIME_INDICES_FIELD} must hold integers")
         if not 0 <= index < query_time_count:
             raise _reject(
-                f"{label}.{_POSITIONS_KEY} entry {index} is outside the "
+                f"{label}.{QUERY_TIME_INDICES_FIELD} entry {index} is outside the "
                 f"{query_time_count} requested future positions"
             )
     if len(set(raw)) != len(raw):
-        raise _reject(f"{label}.{_POSITIONS_KEY} names a position more than once")
+        raise _reject(
+            f"{label}.{QUERY_TIME_INDICES_FIELD} names a position more than once"
+        )
     return tuple(raw)
 
 
@@ -179,14 +181,15 @@ def parse_conditions(
             raise _reject(f"{label} references unknown column {name!r}")
 
         kind = entry.get("kind")
-        if kind not in SUPPORTED_CONDITION_KINDS:
+        if kind not in CONDITION_KINDS:
             raise _reject(
-                f"{label}.kind must be one of {list(SUPPORTED_CONDITION_KINDS)}, "
-                f"got {kind!r}"
+                f"{label}.kind must be one of {list(CONDITION_KINDS)}, got {kind!r}"
             )
 
         expected_keys = (
-            _EQUALITY_KEYS if kind == CONDITION_KIND_EQUALITY else _INTERVAL_KEYS
+            EQUALITY_CONDITION_FIELD_NAMES
+            if kind == CONDITION_KIND_EQUALITY
+            else INTERVAL_CONDITION_FIELD_NAMES
         )
         surplus = set(entry) - expected_keys
         if surplus:
@@ -201,7 +204,7 @@ def parse_conditions(
         if overlap:
             raise _reject(
                 f"column {name!r} carries more than one condition at "
-                f"{_POSITIONS_KEY} {overlap}: {label} overlaps "
+                f"{QUERY_TIME_INDICES_FIELD} {overlap}: {label} overlaps "
                 f"conditions[{claimed[(name, overlap[0])]}]"
             )
         for horizon in horizons:
@@ -229,7 +232,7 @@ def parse_conditions(
         pins = equality[horizon]
         bands = interval[horizon]
         if len(pins) + len(bands) >= len(column_specs):
-            where = f" at {_POSITIONS_KEY} position {horizon}"
+            where = f" at {QUERY_TIME_INDICES_FIELD} position {horizon}"
             if bands:
                 raise _reject(
                     "a request must leave at least one column unconditioned"

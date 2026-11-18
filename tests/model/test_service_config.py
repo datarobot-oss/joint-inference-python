@@ -17,12 +17,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from http import HTTPStatus
 from pathlib import Path
 
 import pytest
 
 import jointfm_inference.model.service.config as service_config
+from jointfm_inference.model.inference import CapacityEnvelope
 from jointfm_inference.model.service import (
     DEFAULT_MAX_CONCURRENT_REQUESTS,
     DEFAULT_MAX_SAMPLE_COUNT,
@@ -36,8 +38,11 @@ from jointfm_inference.model.service.config import (
     CHECKPOINT_URL_ENV,
     CHECKPOINT_VERSION_ENV,
     MAX_CONCURRENT_REQUESTS_ENV,
+    MAX_REQUEST_BYTES_ENV,
     PRECISION_ENV,
+    default_max_request_bytes,
 )
+from jointfm_inference.model.service.constants import REQUEST_COLUMN_NAME_BYTES
 from tests.support.service import clear_service_environment
 
 DIGEST = "ab" * 32
@@ -85,6 +90,7 @@ def test_from_env_applies_the_defaults_of_every_optional_setting(
     assert config.checkpoint_url is None
     assert config.checkpoint_sha256 is None
     assert config.checkpoint_token is None
+    assert config.max_request_bytes is None
 
 
 def test_from_env_requires_the_checkpoint_path(
@@ -247,3 +253,131 @@ def test_from_env_refuses_an_inconsistent_download_source(
     for name, value in settings.items():
         monkeypatch.setenv(name, value)
     assert _refused_field() == field
+
+
+def test_from_env_reads_max_request_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A set request cap replaces the one derived from the capacity envelope."""
+    monkeypatch.setenv(MAX_REQUEST_BYTES_ENV, "4096")
+    assert InferenceServiceConfig.from_env().max_request_bytes == 4096
+
+
+def test_from_env_treats_an_empty_max_request_bytes_as_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(MAX_REQUEST_BYTES_ENV, "")
+    assert InferenceServiceConfig.from_env().max_request_bytes is None
+
+
+@pytest.mark.parametrize("raw_value", ["0", "-1", "lots"])
+def test_from_env_refuses_a_malformed_max_request_bytes(
+    monkeypatch: pytest.MonkeyPatch, raw_value: str
+) -> None:
+    """A request cap that is not a positive integer is a startup error."""
+    monkeypatch.setenv(MAX_REQUEST_BYTES_ENV, raw_value)
+    assert _refused_field() == MAX_REQUEST_BYTES_ENV
+
+
+# The longest JSON spellings of a float64 at full precision and of an ISO 8601
+# timestamp with nanoseconds and a UTC offset.
+_LONGEST_FLOAT = -2.2250738585072014e-308
+_LONGEST_TIMESTAMP = "2026-11-18T12:34:56.123456789+05:30"
+
+
+def _envelope_limit_request(envelope: CapacityEnvelope) -> dict[str, object]:
+    """Return a request at least as large as any a client sizes to ``envelope``.
+
+    Every limit is reached at once: ``max_series`` columns whose names take
+    the budgeted length, ``n_input`` history rows, ``n_output`` query times
+    with their scored query rows, and an interval condition of its own on
+    every column at every query time, each value at full float64 precision.
+    """
+    time_column = "t" * REQUEST_COLUMN_NAME_BYTES
+    names = [
+        f"{index:0{REQUEST_COLUMN_NAME_BYTES}d}" for index in range(envelope.max_series)
+    ]
+    columns = [
+        {
+            "name": name,
+            "modality": "numeric",
+            "role": "target",
+            "nullable": False,
+            "lower_bound": _LONGEST_FLOAT,
+            "upper_bound": -_LONGEST_FLOAT,
+        }
+        for name in names
+    ]
+    conditions = [
+        {
+            "column": name,
+            "kind": "interval",
+            "lower": _LONGEST_FLOAT,
+            "upper": -_LONGEST_FLOAT,
+            "query_time_indices": [position],
+        }
+        for name in names
+        for position in range(envelope.n_output)
+    ]
+
+    def row() -> dict[str, object]:
+        return {time_column: _LONGEST_TIMESTAMP, **dict.fromkeys(names, _LONGEST_FLOAT)}
+
+    return {
+        "request_type": "predict",
+        "schema_version": "v6",
+        "model_version": "jointfm-inference:0.0.0+ckpt.0123456789ab",
+        "query_mode": "condition",
+        "return_mode": "log_prob",
+        "time_index_mode": "absolute_datetime",
+        "time_column": time_column,
+        "time_scale_seconds": _LONGEST_FLOAT,
+        "use_local_normalized_time": False,
+        "calendar_id": "pandas-default",
+        "timezone": "America/Argentina/ComodRivadavia",
+        "columns": columns,
+        "requested_columns": names,
+        "history_rows": [row() for _ in range(envelope.n_input)],
+        "query_times": [_LONGEST_TIMESTAMP] * envelope.n_output,
+        "query_rows": [row() for _ in range(envelope.n_output)],
+        "conditions": conditions,
+        "n_samples": 1000,
+        "quantiles": [0.05, 0.5, 0.95],
+        "seed": 2**63 - 1,
+    }
+
+
+@pytest.mark.parametrize(
+    "envelope",
+    [
+        CapacityEnvelope(
+            min_series=1, max_series=1, t_input=1.0, t_output=1.0, n_input=1, n_output=1
+        ),
+        CapacityEnvelope(
+            min_series=2,
+            max_series=7,
+            t_input=1.0,
+            t_output=1.0,
+            n_input=50,
+            n_output=9,
+        ),
+        CapacityEnvelope(
+            min_series=2,
+            max_series=100,
+            t_input=1.0,
+            t_output=1.0,
+            n_input=732,
+            n_output=288,
+        ),
+    ],
+    ids=["single-cell", "narrow", "wide"],
+)
+def test_the_default_request_cap_admits_a_request_at_every_envelope_limit(
+    envelope: CapacityEnvelope,
+) -> None:
+    """No request the client sizes to the envelope is refused for its size.
+
+    The body is written as ``requests`` writes ``json=``, with the standard
+    library's ``", "`` and ``": "`` separators.
+    """
+    body = json.dumps(_envelope_limit_request(envelope)).encode("utf-8")
+
+    assert len(body) <= default_max_request_bytes(envelope)

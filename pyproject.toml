@@ -49,6 +49,7 @@ jointfm-1 = "jointfm_inference.model.inference.jointfm_1_backend:JOINTFM_1_SERVI
 [dependency-groups]
 dev = [
     "commitizen>=3.31",
+    "jsonschema>=4.26.0",
     "pre-commit",
     "pytest",
     "pytest-cov",

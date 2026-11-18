@@ -32,7 +32,7 @@ from jointfm_inference.model.checkpoint import (
     CHECKPOINT_INFERENCE_METADATA_KEY,
     CHECKPOINT_TIME_INDEX_SUPPORT_KEY,
 )
-from jointfm_inference.model.inference import JointFMInferenceSession
+from jointfm_inference.model.inference import CapacityEnvelope, JointFMInferenceSession
 from jointfm_inference.model.jointfm_1.config import JointFMConfig
 from jointfm_inference.model.jointfm_1.model import JointFM
 from jointfm_inference.model.service import (
@@ -40,11 +40,13 @@ from jointfm_inference.model.service import (
     JointFMHTTPService,
     ServiceError,
 )
+from jointfm_inference.model.service.config import default_max_request_bytes
 from tests.support.models import (
     TINY_CAPACITY_ENVELOPE,
     TINY_CONFIG,
     checkpoint_mapping,
     tiny_config,
+    tiny_model,
     write_checkpoint,
 )
 from tests.support.service import (
@@ -599,9 +601,20 @@ def test_health_payload_reports_the_served_jointfm_1_contract() -> None:
         ],
         "time_index_encoding": "discrete_grid",
         "max_sample_count": _MAX_SAMPLE_COUNT,
+        "max_request_bytes": default_max_request_bytes(
+            CapacityEnvelope(**cast(dict[str, Any], TINY_CAPACITY_ENVELOPE))
+        ),
         "max_concurrent_requests": 1,
         "data_generation": TINY_CAPACITY_ENVELOPE,
     }
+
+
+def test_a_configured_request_cap_replaces_the_envelope_derived_one() -> None:
+    """``JOINTFM_INFERENCE_MAX_REQUEST_BYTES`` reaches both ``/healthz`` and the handler."""
+    service = mount_service(tiny_model(), max_request_bytes=4096)
+
+    assert service.health_payload()["max_request_bytes"] == 4096
+    assert service.max_request_bytes == 4096
 
 
 def test_service_serves_only_the_time_index_modes_the_checkpoint_supports() -> None:

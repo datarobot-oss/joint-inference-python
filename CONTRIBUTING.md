@@ -37,7 +37,7 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | `task run -- <command>` | Run a command inside the project environment |
 | `task test` | Run the unit tests |
 | `task coverage` | Run the unit tests and enforce the coverage floor |
-| `task check` | Read-only static checks: typos, Ruff lint and format check, ty |
+| `task check` | Read-only static checks: typos, Ruff lint and format check, ty, OpenAPI document check |
 | `task license-check` | Fail when a Python file lacks the license header (needs docker) |
 | `task license-fix` | Add the license header to every Python file that lacks it (needs docker) |
 | `task leak-guard` | Fail when a file in the working tree carries private material in its path or content |
@@ -47,6 +47,8 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | `task format` | Apply the Ruff formatter |
 | `task pre-commit` | Run every pre-commit hook on all files |
 | `task build` | Build the source distribution and wheel into `dist/` |
+| `task schema` | Regenerate the committed OpenAPI document from the code; a commit hook, so a commit that leaves it stale stops with the rewritten copy unstaged |
+| `task schema:check` | Fail when the committed OpenAPI document differs from the one the code generates, writing nothing |
 | `task serve` | Serve the checkpoint `.env` configures, downloading it first when `.env` names a URL |
 | `task deploy:preview`, `task deploy`, `task deploy:destroy` | Preview, apply, or delete the DataRobot Workload serving the checkpoint `.env` configures |
 | `task deploy:outputs`, `task deploy:probe` | Print the deployed Workload's endpoint and IDs, or probe it through DataRobot |
@@ -66,10 +68,11 @@ and macOS; the macOS job skips the license header hook because its runners have 
 | Package | Contents |
 |---|---|
 | `jointfm_inference.model.service` | HTTP service: environment configuration, checkpoint download, request validation, conditions, scoring, JSON serialization |
+| `jointfm_inference.model.service.wire_schema` | Every field and vocabulary of the HTTP contract, which the request parsers read and the OpenAPI document is generated from |
 | `jointfm_inference.model.inference` | Inference session, backend registry, backend-neutral contract, conditioning, the JointFM 1 serving backend |
 | `jointfm_inference.model.jointfm_1` | The JointFM 1 network, its Student-t mixture head, and its checkpoint loader |
 | `jointfm_inference.model` | Checkpoint reading, linear algebra, precision, and the command-line probe |
-| `jointfm_inference.cli` | The `jointfm-inference` command and its `serve` and `probe` subcommands |
+| `jointfm_inference.cli` | The `jointfm-inference` command and its `serve`, `probe`, `profile`, and `schema` subcommands |
 | `jointfm_inference.data` | Canonical samples, request times, DataFrame conversion |
 
 ## Checkpoint format

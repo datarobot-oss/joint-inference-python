@@ -76,6 +76,7 @@ def test_settings_forward_only_the_service_settings_that_are_set(
             JOINTFM_INFERENCE_PRECISION="",
             JOINTFM_INFERENCE_CHECKPOINT_URL="https://example.com/serving.pt",
             JOINTFM_INFERENCE_PORT="9000",
+            JOINTFM_INFERENCE_MAX_REQUEST_BYTES="4096",
         )
     )
 
@@ -83,6 +84,7 @@ def test_settings_forward_only_the_service_settings_that_are_set(
     assert settings.service_env == {
         "JOINTFM_INFERENCE_CHECKPOINT_VERSION": "dev",
         "JOINTFM_INFERENCE_DEVICE": "cpu",
+        "JOINTFM_INFERENCE_MAX_REQUEST_BYTES": "4096",
     }
     assert settings.bundle == "cpu.5xlarge"
     assert (settings.cpu, settings.memory, settings.gpu, settings.replicas) == (

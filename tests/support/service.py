@@ -61,6 +61,7 @@ def make_service_config(**overrides: Any) -> InferenceServiceConfig:
         "model_version": MODEL_VERSION,
         "max_sample_count": SERVICE_MAX_SAMPLE_COUNT,
         "max_concurrent_requests": 1,
+        "max_request_bytes": None,
     }
     fields.update(overrides)
     return InferenceServiceConfig(**fields)

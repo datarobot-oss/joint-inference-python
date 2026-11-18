@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Module-level constants for the packaged inference HTTP service."""
+"""Module-level constants for the packaged inference HTTP service.
+
+The wire vocabularies (request fields, modes, condition kinds) live in
+``wire_schema``, which the OpenAPI document is generated from.
+"""
 
 from __future__ import annotations
 
@@ -29,41 +33,32 @@ DEFAULT_MAX_SAMPLE_COUNT = 1000
 # on larger devices should raise it via ``JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS`` to
 # the number of largest requests whose peak memory fits the device at once.
 DEFAULT_MAX_CONCURRENT_REQUESTS = 1
-QUERY_MODE_FORECAST = "forecast"
-# Conditional queries against the emitted joint at the future positions the
-# conditions cover. A deployment advertises this mode only when the mounted head
-# and backend can answer it, so the name is a vocabulary constant rather than a
-# served set.
-QUERY_MODE_CONDITION = "condition"
-CONDITION_KIND_EQUALITY = "equality"
-CONDITION_KIND_INTERVAL = "interval"
-SUPPORTED_CONDITION_KINDS = (CONDITION_KIND_EQUALITY, CONDITION_KIND_INTERVAL)
-PREDICT_REQUEST_TYPE = "predict"
-HEALTH_REQUEST_TYPE = "health"
-SUPPORTED_REQUEST_TYPES = frozenset({PREDICT_REQUEST_TYPE, HEALTH_REQUEST_TYPE})
-# Every top-level key a prediction request may carry. A key outside this set is
-# refused rather than ignored, so a misspelled option fails visibly.
-REQUEST_FIELDS = frozenset(
-    {
-        "request_type",
-        "schema_version",
-        "model_version",
-        "query_mode",
-        "return_mode",
-        "time_index_mode",
-        "time_column",
-        "time_scale_seconds",
-        "use_local_normalized_time",
-        "calendar_id",
-        "timezone",
-        "columns",
-        "requested_columns",
-        "history_rows",
-        "query_times",
-        "query_rows",
-        "conditions",
-        "n_samples",
-        "quantiles",
-        "seed",
-    }
-)
+# The default ``max_request_bytes`` (``default_max_request_bytes`` in
+# ``config.py``) admits a request at every limit of the capacity envelope.
+# A cell is one value keyed by its column name in a ``history_rows`` or
+# ``query_rows`` mapping, or one ``query_times`` entry. Its budget covers the
+# longest value, an ISO 8601 timestamp with nanoseconds and a UTC offset
+# (37 bytes quoted; a full-precision float64 takes at most 24), a column name
+# of up to ``REQUEST_COLUMN_NAME_BYTES``, and the quotes and the ``": "`` and
+# ``", "`` separators the standard library's ``json.dumps`` writes.
+REQUEST_COLUMN_NAME_BYTES = 64
+REQUEST_CELL_BYTES = 128
+# Each row holds one value per column plus its time value, and each query row
+# also has its ``query_times`` entry.
+REQUEST_TIME_CELLS_PER_ROW = 2
+# One interval condition of its own on one column at one query time, the
+# largest a column and position can carry: the column name, the kind, two
+# full-precision bounds, and a one-element ``query_time_indices``.
+REQUEST_CONDITION_BYTES = 256
+# One column descriptor with its bounds, traits, and categorical mapping, plus
+# the column's ``requested_columns`` entry.
+REQUEST_COLUMN_BYTES = 4096
+# Every other top-level field: versions, modes, quantiles, the seed.
+REQUEST_BASE_BYTES = 65536
+# Seconds a connection may go without sending or accepting a byte before the
+# handler drops it, so a stalled client cannot hold a server thread.
+REQUEST_TIMEOUT_SECONDS = 60.0
+# Response bytes per socket send: ``sendall`` bounds a whole call's duration
+# by the timeout, so chunking keeps that timeout a stall bound instead of a
+# cap on how long a large response may take to download.
+RESPONSE_WRITE_CHUNK_BYTES = 1 << 20
