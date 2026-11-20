@@ -1,3 +1,9 @@
+## v0.10.0 (2026-11-20)
+
+### Feat
+
+- Start an inference service from Python with LocalService and ServiceSettings, and require torch>=2.15.0 instead of exactly 2.15.0
+
 ## v0.9.0 (2026-11-20)
 
 ### Feat
