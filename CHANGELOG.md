@@ -1,3 +1,9 @@
+## v0.9.0 (2026-11-20)
+
+### Feat
+
+- Serve locally and from the container image
+
 ## v0.8.0 (2026-11-18)
 
 ### Feat
