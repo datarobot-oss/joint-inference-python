@@ -176,14 +176,7 @@ HEALTH_FIELDS: Final = _all_required(
     WireField(
         "supported_condition_kinds",
         _array_of(enum_schema(CONDITION_KIND_VALUES)),
-        "The condition kinds a `condition` query may use; empty where the "
-        "service answers no `condition` query.",
-    ),
-    WireField(
-        "supported_metadata_traits",
-        _array_of(_STRING),
-        "The traits a column descriptor's `traits` may carry; empty where the "
-        "model reads none.",
+        "The condition kinds a `condition` query may use.",
     ),
     WireField(
         "supported_return_modes",

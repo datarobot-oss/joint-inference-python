@@ -22,7 +22,6 @@ tuples is refused by the service and fails validation against the document.
 from __future__ import annotations
 
 from collections.abc import Mapping
-import json
 from typing import Any, Final
 
 from jointfm_inference.data.time_index import DEFAULT_ABSOLUTE_DATETIME_SCALE_SECONDS
@@ -41,7 +40,6 @@ from .fields import (
 from .vocabulary import (
     CONDITION_KIND_EQUALITY,
     CONDITION_KIND_INTERVAL,
-    DEFAULT_CALENDAR_ID,
     DEFAULT_QUERY_MODE,
     DEFAULT_REQUEST_TYPE,
     DEFAULT_RETURN_MODE,
@@ -60,33 +58,6 @@ _NAME: Final[Mapping[str, Any]] = {"type": "string", "minLength": 1}
 _NUMBER: Final[Mapping[str, Any]] = {"type": "number"}
 QUERY_TIME_INDICES_FIELD: Final = "query_time_indices"
 
-# Column descriptor fields the service accepts only absent, ``null``, or at
-# the listed values.
-DEFAULT_ONLY_DESCRIPTOR_VALUES: Final[Mapping[str, tuple[Any, ...]]] = {
-    "nullable": (False,),
-    "vocabulary_size": (),
-    "level_count": (),
-    "mapping": (),
-    "time_value_kind": (),
-    "time_value_scale_seconds": (),
-    "time_value_use_local_normalized_time": (False,),
-    "time_value_calendar_id": (DEFAULT_CALENDAR_ID,),
-    "time_value_timezone": (),
-    "traits": ({},),
-}
-
-
-def _default_only_field(name: str) -> WireField:
-    """Return the descriptor field ``name``, served only at its default values."""
-    served = DEFAULT_ONLY_DESCRIPTOR_VALUES[name]
-    passes = " or ".join(f"`{json.dumps(value)}`" for value in (None, *served))
-    return WireField(
-        name,
-        {"enum": [*served, None]},
-        f"Not served; omit it or pass {passes}.",
-    )
-
-
 COLUMN_DESCRIPTOR_FIELDS: Final = (
     WireField(
         "name",
@@ -98,8 +69,7 @@ COLUMN_DESCRIPTOR_FIELDS: Final = (
     WireField(
         "modality",
         {"type": "string", "const": SERVED_MODALITY},
-        f"The kind of value the column holds; this service reads "
-        f"`{SERVED_MODALITY}` columns only.",
+        f"The column's value type: `{SERVED_MODALITY}`.",
         required=True,
     ),
     WireField(
@@ -121,7 +91,6 @@ COLUMN_DESCRIPTOR_FIELDS: Final = (
         nullable(_NUMBER),
         "An upper bound every sampled draw of the column respects.",
     ),
-    *(_default_only_field(name) for name in DEFAULT_ONLY_DESCRIPTOR_VALUES),
 )
 COLUMN_DESCRIPTOR_FIELD_NAMES: Final = field_names(COLUMN_DESCRIPTOR_FIELDS)
 
@@ -253,16 +222,6 @@ PREDICT_REQUEST_FIELDS: Final = (
         "Seconds per time unit the model reads `absolute_datetime` times in; "
         f"defaults to {DEFAULT_ABSOLUTE_DATETIME_SCALE_SECONDS:.0f}, one Julian "
         "year.",
-    ),
-    WireField(
-        "use_local_normalized_time",
-        nullable({"type": "boolean", "const": False}),
-        "Not served; omit it or pass `false`.",
-    ),
-    WireField(
-        "calendar_id",
-        nullable({"type": "string", "const": DEFAULT_CALENDAR_ID}),
-        f"Not served beyond the default; omit it or pass `{DEFAULT_CALENDAR_ID}`.",
     ),
     WireField(
         "timezone",

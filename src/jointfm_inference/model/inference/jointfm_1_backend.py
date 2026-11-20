@@ -64,8 +64,7 @@ DECODING_STRATEGY: Final = "parallel_dense"
 class JointFM1InferenceBackend:
     """A JointFM 1 network mounted for serving.
 
-    It serves every return mode and conditioning, and reads no metadata
-    traits.
+    It serves every return mode and conditioning.
     """
 
     def __init__(
@@ -119,19 +118,9 @@ class JointFM1InferenceBackend:
         return DECODING_STRATEGY
 
     @property
-    def metadata_traits(self) -> tuple[str, ...]:
-        """Return no traits: JointFM 1 reads no expert hints."""
-        return ()
-
-    @property
     def supported_return_modes(self) -> frozenset[str]:
         """Return every return mode."""
         return INFERENCE_RETURN_MODES
-
-    @property
-    def supports_conditioning(self) -> bool:
-        """Return ``True``: the Student-t mixture has a closed-form conditional."""
-        return True
 
     def execute(
         self, request: CanonicalInferenceRequest

@@ -23,9 +23,8 @@ from the same mixture, which is the only independent oracle a positive-mass
 region has, and a one-column tail region against the Student-t distribution
 function itself.
 
-Two rejections are checked for *when* they happen rather than only for their
-code: a backend that cannot condition and a malformed block must both be
-refused before the model forward, which the fixture counts.
+A malformed block is checked for *when* it is refused rather than only for
+its code: before the model forward, which the fixture counts.
 """
 
 import math
@@ -35,7 +34,6 @@ import pytest
 import torch
 from scipy.special import stdtr
 
-from jointfm_inference.model.inference.jointfm_1_backend import JointFM1InferenceBackend
 from jointfm_inference.model.service import ServiceError
 from tests.support.condition_mode import (
     COLUMN_COUNT,
@@ -65,20 +63,6 @@ def _in_process_conditional_mean(pinned: float, horizon: int) -> float:
     return float((weights * conditional.params["means"][0, horizon, :, 0]).sum())
 
 
-def _cannot_condition(backend: JointFM1InferenceBackend) -> bool:
-    """Report a backend whose results answer no conditioning request."""
-    del backend
-    return False
-
-
-@pytest.fixture
-def backend_without_conditioning(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every backend mounted in the test report that it cannot condition."""
-    monkeypatch.setattr(
-        JointFM1InferenceBackend, "supports_conditioning", property(_cannot_condition)
-    )
-
-
 def test_health_advertises_condition_for_a_conditioning_backend() -> None:
     """A caller must learn the capability from the advertisement, not from an error."""
     service, _ = service_and_model()
@@ -87,30 +71,6 @@ def test_health_advertises_condition_for_a_conditioning_backend() -> None:
 
     assert payload["supported_query_modes"] == ["forecast", "condition"]
     assert payload["supported_condition_kinds"] == ["equality", "interval"]
-
-
-@pytest.mark.usefixtures("backend_without_conditioning")
-def test_health_advertises_no_condition_for_a_backend_that_cannot_answer() -> None:
-    """The advertisement is derived from the mounted backend, not hardcoded."""
-    service, _ = service_and_model()
-
-    payload = service.health_payload()
-
-    assert payload["supported_query_modes"] == ["forecast"]
-    assert payload["supported_condition_kinds"] == []
-
-
-@pytest.mark.usefixtures("backend_without_conditioning")
-def test_a_backend_that_cannot_condition_is_refused_before_model_execution() -> None:
-    """The rejection must cost no forward pass, and must name the enumerated code."""
-    service, forward = service_and_model()
-
-    with pytest.raises(ServiceError) as rejection:
-        service.predict(make_payload())
-
-    assert rejection.value.code == "UNSUPPORTED_HEAD_QUERY_COMBINATION"
-    assert rejection.value.field == "query_mode"
-    assert forward.calls == 0
 
 
 def test_equality_condition_matches_the_same_parameters_conditioned_in_process() -> (

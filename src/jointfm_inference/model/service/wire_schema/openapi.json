@@ -922,30 +922,6 @@
             ],
             "description": "Seconds per time unit the model reads `absolute_datetime` times in; defaults to 31557600, one Julian year."
           },
-          "use_local_normalized_time": {
-            "anyOf": [
-              {
-                "type": "boolean",
-                "const": false
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Not served; omit it or pass `false`."
-          },
-          "calendar_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "const": "pandas-default"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Not served beyond the default; omit it or pass `pandas-default`."
-          },
           "timezone": {
             "anyOf": [
               {
@@ -1222,7 +1198,7 @@
           "modality": {
             "type": "string",
             "const": "numeric",
-            "description": "The kind of value the column holds; this service reads `numeric` columns only."
+            "description": "The column's value type: `numeric`."
           },
           "role": {
             "anyOf": [
@@ -1261,70 +1237,6 @@
               }
             ],
             "description": "An upper bound every sampled draw of the column respects."
-          },
-          "nullable": {
-            "enum": [
-              false,
-              null
-            ],
-            "description": "Not served; omit it or pass `null` or `false`."
-          },
-          "vocabulary_size": {
-            "enum": [
-              null
-            ],
-            "description": "Not served; omit it or pass `null`."
-          },
-          "level_count": {
-            "enum": [
-              null
-            ],
-            "description": "Not served; omit it or pass `null`."
-          },
-          "mapping": {
-            "enum": [
-              null
-            ],
-            "description": "Not served; omit it or pass `null`."
-          },
-          "time_value_kind": {
-            "enum": [
-              null
-            ],
-            "description": "Not served; omit it or pass `null`."
-          },
-          "time_value_scale_seconds": {
-            "enum": [
-              null
-            ],
-            "description": "Not served; omit it or pass `null`."
-          },
-          "time_value_use_local_normalized_time": {
-            "enum": [
-              false,
-              null
-            ],
-            "description": "Not served; omit it or pass `null` or `false`."
-          },
-          "time_value_calendar_id": {
-            "enum": [
-              "pandas-default",
-              null
-            ],
-            "description": "Not served; omit it or pass `null` or `\"pandas-default\"`."
-          },
-          "time_value_timezone": {
-            "enum": [
-              null
-            ],
-            "description": "Not served; omit it or pass `null`."
-          },
-          "traits": {
-            "enum": [
-              {},
-              null
-            ],
-            "description": "Not served; omit it or pass `null` or `{}`."
           }
         },
         "required": [
@@ -2458,14 +2370,7 @@
                 "interval"
               ]
             },
-            "description": "The condition kinds a `condition` query may use; empty where the service answers no `condition` query."
-          },
-          "supported_metadata_traits": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The traits a column descriptor's `traits` may carry; empty where the model reads none."
+            "description": "The condition kinds a `condition` query may use."
           },
           "supported_return_modes": {
             "type": "array",
@@ -2534,7 +2439,6 @@
           "decoding_strategy",
           "supported_query_modes",
           "supported_condition_kinds",
-          "supported_metadata_traits",
           "supported_return_modes",
           "supported_time_index_modes",
           "time_index_encoding",
@@ -2605,7 +2509,7 @@
               "MODEL_VERSION_MISMATCH",
               "INTERNAL_ERROR"
             ],
-            "description": "What went wrong, as a value a client can branch on.\n\n- `VALIDATION_ERROR`: The request is malformed or asks for something the service does not serve; `field` names the offending field.\n- `UNSUPPORTED_HEAD_QUERY_COMBINATION`: The mounted head cannot answer the requested `query_mode`.\n- `UNSUPPORTED_RETURN_MODE`: In the catalog but not sent by this service: an unserved `return_mode` answers `VALIDATION_ERROR`.\n- `INPUT_SIZE_EXCEEDED`: The request exceeds a service cap: `n_samples` above `max_sample_count`, or a body above `max_request_bytes`. `requested` and `allowed` carry both sizes.\n- `SCHEMA_VERSION_MISMATCH`: `schema_version` differs from the version the service speaks.\n- `MODEL_VERSION_MISMATCH`: `model_version` differs from the version the service serves.\n- `INTERNAL_ERROR`: The service failed on a request it accepted."
+            "description": "What went wrong, as a value a client can branch on.\n\n- `VALIDATION_ERROR`: The request is malformed or asks for something the service does not serve; `field` names the offending field.\n- `UNSUPPORTED_HEAD_QUERY_COMBINATION`: In the catalog but not sent by this service: the mounted head answers every `query_mode`.\n- `UNSUPPORTED_RETURN_MODE`: In the catalog but not sent by this service: an unserved `return_mode` answers `VALIDATION_ERROR`.\n- `INPUT_SIZE_EXCEEDED`: The request exceeds a service cap: `n_samples` above `max_sample_count`, or a body above `max_request_bytes`. `requested` and `allowed` carry both sizes.\n- `SCHEMA_VERSION_MISMATCH`: `schema_version` differs from the version the service speaks.\n- `MODEL_VERSION_MISMATCH`: `model_version` differs from the version the service serves.\n- `INTERNAL_ERROR`: The service failed on a request it accepted."
           },
           "message": {
             "type": "string",

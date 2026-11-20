@@ -31,7 +31,7 @@ SAMPLES = {
     "private-ip-address": "10.2" + ".3.4",
     "datarobot-host": "tenant-example" + ".datarobot.com",
     "private-repository-link": "github.com/datarobot/" + "secret-repo",
-    "planning-label": "Phase" + " 3g",
+    "planning-label": "Phase" + " 7",
     "unreleased-generation": "JointFM" + " 2",
     "credential": "AKIA" + "ABCDEFGHIJKLMNOP",
 }

@@ -53,7 +53,6 @@ from jointfm_inference.model.service.serialization import _serialize_log_prob_te
 from jointfm_inference.model.service.time_conversion import _serialize_query_times
 from jointfm_inference.model.service.wire_schema import COLUMN_DESCRIPTOR_FIELD_NAMES
 from jointfm_inference.model.service.validation import (
-    _optional_bool,
     _optional_float,
     _optional_int,
     _optional_string,
@@ -285,11 +284,6 @@ def test_service_env_and_optional_field_parsers_validate_edges(
     monkeypatch.delenv("JOINTFM_INFERENCE_PORT_TEST", raising=False)
     assert _positive_int_from_env("JOINTFM_INFERENCE_PORT_TEST", 8080) == 8080
 
-    assert _optional_bool(None, field="flag", default=True) is True
-    assert _optional_bool(False, field="flag", default=True) is False
-    with pytest.raises(ServiceError, match="must be a boolean"):
-        _optional_bool(1, field="flag", default=False)
-
     assert _optional_float(4, field="scale") == 4.0
     with pytest.raises(ServiceError, match="must be numeric"):
         _optional_float(True, field="scale")
@@ -315,74 +309,30 @@ def test_parse_column_specs_reads_name_role_and_bounds() -> None:
     ]
 
 
-# One non-default value per descriptor field the service accepts only at its default.
-_NON_DEFAULT_DESCRIPTOR_VALUES = {
-    "nullable": True,
-    "vocabulary_size": 5,
-    "level_count": 4,
-    "mapping": {"a": 0, "b": 1},
-    "time_value_kind": "absolute_datetime",
-    "time_value_scale_seconds": 60,
-    "time_value_use_local_normalized_time": True,
-    "time_value_calendar_id": "business-days",
-    "time_value_timezone": "UTC",
-    "traits": {"seasonal": "present"},
-}
-
-
-def test_every_default_only_descriptor_field_has_a_refusal_case() -> None:
-    """A descriptor field added later must be covered by the refusal cases below."""
-    served = {"name", "modality", "role", "lower_bound", "upper_bound"}
-
-    assert set(_NON_DEFAULT_DESCRIPTOR_VALUES) == COLUMN_DESCRIPTOR_FIELD_NAMES - served
-
-
-@pytest.mark.parametrize(
-    ("key", "value"), sorted(_NON_DEFAULT_DESCRIPTOR_VALUES.items())
-)
-def test_parse_column_specs_refuses_a_non_default_descriptor_field(
-    key: str, value: Any
-) -> None:
-    column = {"name": "target", "modality": "numeric", key: value}
-
-    with pytest.raises(ServiceError, match="is not served") as exc_info:
-        _parse_column_specs([{"name": "driver", "modality": "numeric"}, column])
-
-    assert exc_info.value.code == "VALIDATION_ERROR"
-    assert exc_info.value.field == f"columns[1].{key}"
-
-
-def test_parse_column_specs_accepts_descriptor_fields_at_their_defaults() -> None:
-    columns = _parse_column_specs(
-        [
-            {
-                "name": "target",
-                "modality": "numeric",
-                "nullable": False,
-                "traits": {},
-                "time_value_use_local_normalized_time": False,
-                "time_value_calendar_id": "pandas-default",
-                "vocabulary_size": None,
-            }
-        ]
-    )
-
-    assert columns == [ColumnSpec(name="target")]
+def test_a_column_descriptor_holds_only_the_fields_the_service_reads() -> None:
+    """A descriptor key outside these is refused as unknown, never dropped."""
+    assert COLUMN_DESCRIPTOR_FIELD_NAMES == {
+        "name",
+        "modality",
+        "role",
+        "lower_bound",
+        "upper_bound",
+    }
 
 
 @pytest.mark.parametrize(
     ("column", "field", "message"),
     [
         pytest.param(
-            {"name": "c", "modality": "categorical"},
+            {"name": "c", "modality": "text"},
             "columns[0].modality",
-            "is not served",
+            "must be 'numeric'",
             id="modality",
         ),
         pytest.param(
-            {"name": "c", "modality": "numeric", "role": "static"},
+            {"name": "c", "modality": "numeric", "role": "other"},
             "columns[0].role",
-            "is not served",
+            "must be one of",
             id="role",
         ),
         pytest.param(
@@ -850,10 +800,3 @@ def test_server_main_creates_service_and_serves(
     monkeypatch.setattr(service_server, "serve", fake_serve)
     service_server.main()
     assert events == ["created", sentinel]
-
-
-@pytest.mark.parametrize("field", ["nullable", "time_value_use_local_normalized_time"])
-def test_a_default_only_boolean_field_refuses_an_integer(field: str) -> None:
-    with pytest.raises(ServiceError) as raised:
-        _parse_column_specs([{"name": "c", "modality": "numeric", field: 0}])
-    assert raised.value.field == f"columns[0].{field}"

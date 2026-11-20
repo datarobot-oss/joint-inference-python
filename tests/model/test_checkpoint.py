@@ -157,7 +157,7 @@ def test_runtime_metadata_that_is_not_a_mapping_is_refused() -> None:
 @pytest.mark.parametrize(
     ("change", "match"),
     [
-        ({"world": "legacy"}, r"unknown \['world'\]"),
+        ({"note": "extra"}, r"unknown \['note'\]"),
         ({CHECKPOINT_GENERATION_KEY: None}, r"missing \['generation'\]"),
         ({CHECKPOINT_WEIGHTS_DTYPE_KEY: None}, r"missing \['weights_dtype'\]"),
     ],

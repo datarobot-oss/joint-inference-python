@@ -33,7 +33,6 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | Task | What it does |
 |---|---|
 | `task setup` | Create or reuse `.venv`, sync all dependency groups, install the git hooks, ripgrep, and typos |
-| `task start` | Write `.env` with the DataRobot CLI, which also logs in and fills in the DataRobot endpoint and token |
 | `task run -- <command>` | Run a command inside the project environment |
 | `task test` | Run the unit tests |
 | `task coverage` | Run the unit tests and enforce the coverage floor |
@@ -47,19 +46,16 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | `task vuln-scan` | Fail when a package pinned in `uv.lock` has a known vulnerability, scanned by osv-scanner (needs docker) |
 | `task format` | Apply the Ruff formatter |
 | `task pre-commit` | Run every pre-commit hook on all files |
-| `task build` | Build the source distribution and wheel into `dist/` |
+| `task build` | Build the source distribution and wheel into `dist/`, then install the wheel into a fresh environment, serve a test checkpoint from it, and probe every return mode; the publish workflow runs it before every upload |
 | `task schema` | Regenerate the committed OpenAPI document from the code; a commit hook, so a commit that leaves it stale stops with the rewritten copy unstaged |
 | `task schema:check` | Fail when the committed OpenAPI document differs from the one the code generates, writing nothing |
 | `task serve` | Serve the checkpoint `.env` configures, downloading it first when `.env` names a URL |
-| `task deploy:preview`, `task deploy`, `task deploy:destroy` | Preview, apply, or delete the DataRobot Workload serving the checkpoint `.env` configures |
-| `task deploy:outputs`, `task deploy:probe` | Print the deployed Workload's endpoint and IDs, or probe it through DataRobot |
-| `task deploy:bundles` | List the resource bundles the DataRobot cluster offers Workloads |
 | `task probe` | Probe the local service, or the services named after `--` |
 | `task docker:build` | Build the container image, which holds no weights |
 | `task docker:run` | Run the container image on the checkpoint `.env` configures |
 | `task release:dry` | Preview the next version and its CHANGELOG entries without changing any file |
 | `task release` | Cut a release: bump the version, write `CHANGELOG.md`, commit, and tag |
-| `task release:publish` | Push the release commit and its tag to `origin` |
+| `task release:publish` | Push the release commit and its tag to `origin`, whose Publish to PyPI workflow then uploads the release |
 
 Every task prints an `OK:` or `FAIL:` line. CI runs the same checks as `task pre-commit`, each as
 its own job named for what it checks, plus `task build`. Only the unit tests run on both Ubuntu and

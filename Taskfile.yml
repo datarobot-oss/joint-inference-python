@@ -18,14 +18,6 @@ vars:
   COMPATIBILITY_TESTS: tests/compatibility
   # The committed OpenAPI document, shipped as package data.
   OPENAPI_PATH: src/jointfm_inference/model/service/wire_schema/openapi.json
-  # Shared opening of every deploy:* target: install the Pulumi program's
-  # dependencies and select (or create) the stack .env names.
-  DEPLOY_STACK_SETUP: |
-    export PULUMI_BACKEND_URL="${PULUMI_BACKEND_URL:-file://~}"
-    STACK="${JOINTFM_DEPLOY_STACK:-dev}"
-    uv sync --group deploy --quiet
-    cd deploy
-    pulumi stack select --create "$STACK" >/dev/null
 
 tasks:
   default:
@@ -242,13 +234,20 @@ tasks:
       fi
 
   build:
-    desc: Build the source distribution and wheel into dist/
+    desc: "Build the source distribution and wheel into dist/, then install the wheel into a fresh environment, serve a test checkpoint from it, and probe every return mode (task build -- --port 18081 picks another port)"
+    vars:
+      # Tiny, with random weights, and owned by the backward compatibility tests.
+      SMOKE_CHECKPOINT: '{{.COMPATIBILITY_TESTS}}/jointfm_1_checkpoints/column-equivariant.pt'
     cmd: |
       rm -rf dist
-      if uv build; then
-        echo "OK: built $(ls dist | tr '\n' ' ')"
-      else
+      if ! uv build; then
         echo "FAIL: uv build failed"
+        exit 1
+      fi
+      if uv run --no-project --python {{.PYTHON_VERSION}} scripts/smoke_test_wheel.py --checkpoint {{.SMOKE_CHECKPOINT}} --python {{.PYTHON_VERSION}} {{.CLI_ARGS}}; then
+        echo "OK: built $(ls dist | tr '\n' ' ')and served a checkpoint from the installed wheel"
+      else
+        echo "FAIL: the built wheel did not install, serve, or pass the probe"
         exit 1
       fi
 
@@ -343,7 +342,7 @@ tasks:
         echo "  publish with: task release:publish"
 
   release:publish:
-    desc: Push the release commit and its tag to origin
+    desc: Push the release commit and its tag to origin, whose Publish to PyPI workflow then uploads the release
     cmds:
       - task: release:require-tag
       - |
@@ -369,7 +368,7 @@ tasks:
         echo "[4/5] checking $TAG is not already published..."
         git fetch --quiet origin main
         if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
-          echo "FAIL: origin already has $TAG; a published tag never moves."
+          echo "FAIL: origin already has $TAG; a published tag never moves, and PyPI never accepts a version twice."
           echo "Cut a new release instead of republishing this one."
           exit 1
         fi
@@ -377,7 +376,7 @@ tasks:
         git --no-pager log --oneline origin/main..HEAD
         echo
         if [ -t 0 ]; then
-          printf 'Push main and %s to origin? [y/N] ' "$TAG"
+          printf 'Push main and %s to origin? This publishes %s to PyPI. [y/N] ' "$TAG" "$TAG"
           read -r CONFIRMATION
           case "$CONFIRMATION" in
             y|Y|yes|YES) ;;
@@ -389,6 +388,7 @@ tasks:
         fi
         if git push origin main && git push origin "refs/tags/$TAG"; then
           echo "OK: pushed main and $TAG to origin"
+          echo "  the Publish to PyPI workflow now builds, checks, and uploads $TAG"
         else
           echo "FAIL: push to origin failed"
           exit 1
@@ -404,25 +404,12 @@ tasks:
         exit 1
       fi
 
-  start:
-    desc: "Fill in .env with the DataRobot CLI: dr logs in, writes DATAROBOT_ENDPOINT and DATAROBOT_API_TOKEN, and asks for the rest (dr start runs this)"
-    preconditions:
-      - sh: command -v dr >/dev/null 2>&1
-        msg: "FAIL: task start needs the DataRobot CLI (https://github.com/datarobot-oss/cli); without it, copy .env.template to .env and fill it in"
-    cmd: |
-      if dr dotenv setup --if-needed && dr dotenv update; then
-        echo "OK: .env is filled in"
-      else
-        echo "FAIL: dr could not fill in .env"
-        exit 1
-      fi
-
   serve:
     desc: Serve the checkpoint that .env configures, downloading it first when .env names a URL (stop with Ctrl-C)
     dotenv: [.env]
     preconditions:
       - sh: test -f .env
-        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
+        msg: "FAIL: .env is missing; copy .env.template to .env and fill it in"
     cmd: |
       STATUS=0
       uv run jointfm-inference serve || STATUS=$?
@@ -454,7 +441,7 @@ tasks:
     dotenv: [.env]
     preconditions:
       - sh: test -f .env
-        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
+        msg: "FAIL: .env is missing; copy .env.template to .env and fill it in"
     cmd: |
       if uv run jointfm-inference profile {{.CLI_ARGS}}; then
         echo "OK: every profiled request was answered"
@@ -484,7 +471,7 @@ tasks:
       - sh: command -v docker >/dev/null 2>&1
         msg: "FAIL: docker is required for docker:run"
       - sh: test -f .env
-        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
+        msg: "FAIL: .env is missing; copy .env.template to .env and fill it in"
       - sh: test -n "${JOINTFM_INFERENCE_CHECKPOINT_PATH:-}"
         msg: "FAIL: set JOINTFM_INFERENCE_CHECKPOINT_PATH in .env"
     cmd: |
@@ -494,7 +481,8 @@ tasks:
       CHECKPOINT_DIR="$(cd "$CHECKPOINT_DIR" && pwd)"
       CHECKPOINT_FILE="$(basename "$JOINTFM_INFERENCE_CHECKPOINT_PATH")"
       # Pass the service settings by name rather than with --env-file, which
-      # keeps the quotes dr writes around values; the explicit ones below win.
+      # would keep the quotes around quoted .env values; the explicit ones
+      # below win.
       set --
       for NAME in $(env | sed -n 's/^\(JOINTFM_INFERENCE_[A-Z0-9_]*\)=.*/\1/p'); do
         set -- "$@" --env "$NAME"
@@ -514,98 +502,6 @@ tasks:
         echo "OK: container stopped"
       else
         echo "FAIL: container exited with an error"
-        exit 1
-      fi
-
-  deploy:preview:
-    desc: Preview what task deploy would create or change in DataRobot for the checkpoint .env configures
-    dotenv: [.env]
-    preconditions: &deploy-preconditions
-      - sh: test -f .env
-        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
-      - sh: command -v pulumi >/dev/null 2>&1
-        msg: "FAIL: the pulumi CLI is required; see https://www.pulumi.com/docs/install/"
-      - sh: test -n "${PULUMI_CONFIG_PASSPHRASE+set}"
-        msg: "FAIL: set PULUMI_CONFIG_PASSPHRASE in .env (it may be empty)"
-    cmd: |
-      {{.DEPLOY_STACK_SETUP}}
-      if pulumi preview {{.CLI_ARGS}}; then
-        echo "OK: previewed stack $STACK"
-      else
-        echo "FAIL: preview of stack $STACK failed"
-        exit 1
-      fi
-
-  deploy:
-    desc: "Build the image in DataRobot and run it as a Workload serving the checkpoint .env configures; pulumi up asks before applying (task deploy -- --yes skips that)"
-    dotenv: [.env]
-    preconditions: *deploy-preconditions
-    cmd: |
-      {{.DEPLOY_STACK_SETUP}}
-      if pulumi up {{.CLI_ARGS}}; then
-        echo "OK: deployed stack $STACK; endpoint: $(pulumi stack output endpoint)"
-      else
-        echo "FAIL: deploy of stack $STACK failed"
-        exit 1
-      fi
-
-  deploy:bundles:
-    desc: List the resource bundles the DataRobot cluster in .env offers Workloads; any ID is a valid JOINTFM_DEPLOY_BUNDLE
-    dotenv: [.env]
-    preconditions:
-      - sh: test -f .env
-        msg: "FAIL: .env is missing; run task start, or copy .env.template to .env and fill it in"
-      - sh: test -n "${DATAROBOT_ENDPOINT:-}" && test -n "${DATAROBOT_API_TOKEN:-}"
-        msg: "FAIL: set DATAROBOT_ENDPOINT and DATAROBOT_API_TOKEN in .env"
-    cmd: |
-      uv sync --group deploy --quiet
-      if uv run python deploy/bundles.py; then
-        echo "OK: listed the Workload bundles at $DATAROBOT_ENDPOINT"
-      else
-        echo "FAIL: could not list the Workload bundles at $DATAROBOT_ENDPOINT"
-        exit 1
-      fi
-
-  deploy:outputs:
-    desc: Print the deployed Workload's endpoint and IDs
-    dotenv: [.env]
-    preconditions: *deploy-preconditions
-    cmd: |
-      {{.DEPLOY_STACK_SETUP}}
-      if pulumi stack output --json; then
-        echo "OK: printed the outputs of stack $STACK"
-      else
-        echo "FAIL: could not read the outputs of stack $STACK"
-        exit 1
-      fi
-
-  deploy:probe:
-    desc: Probe the deployed Workload's health and every return mode it advertises, authenticating with DATAROBOT_API_TOKEN
-    dotenv: [.env]
-    preconditions: *deploy-preconditions
-    cmd: |
-      {{.DEPLOY_STACK_SETUP}}
-      ENDPOINT="$(pulumi stack output endpoint)"
-      cd ..
-      if uv run jointfm-inference probe --service-url "$ENDPOINT" \
-        --header "Authorization: Bearer $DATAROBOT_API_TOKEN" \
-        --timeout-seconds 120 {{.CLI_ARGS}}; then
-        echo "OK: the Workload at $ENDPOINT answered every advertised return mode"
-      else
-        echo "FAIL: probing the Workload at $ENDPOINT failed"
-        exit 1
-      fi
-
-  deploy:destroy:
-    desc: Delete the Workload and Artifact of the stack .env names; pulumi asks before deleting
-    dotenv: [.env]
-    preconditions: *deploy-preconditions
-    cmd: |
-      {{.DEPLOY_STACK_SETUP}}
-      if pulumi destroy {{.CLI_ARGS}}; then
-        echo "OK: destroyed stack $STACK"
-      else
-        echo "FAIL: destroy of stack $STACK failed"
         exit 1
       fi
 

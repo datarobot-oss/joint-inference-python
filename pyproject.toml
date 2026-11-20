@@ -15,9 +15,7 @@ authors = [
 ]
 keywords = ["forecasting", "inference", "jointfm"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
-    # PyPI rejects every upload that carries this classifier.
-    "Private :: Do Not Upload",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Operating System :: MacOS",
@@ -38,6 +36,7 @@ dependencies = [
 
 [project.urls]
 Repository = "https://github.com/datarobot-oss/joint-inference-python"
+Changelog = "https://github.com/datarobot-oss/joint-inference-python/blob/main/CHANGELOG.md"
 
 [project.scripts]
 jointfm-inference = "jointfm_inference.cli:main"
@@ -54,14 +53,8 @@ dev = [
     "pytest",
     "pytest-cov",
     "pytest-xdist",
-    "pyyaml",
     "ruff",
     "ty",
-]
-# The Pulumi program in deploy/; never installed into the serving image.
-deploy = [
-    "pulumi>=3.175",
-    "pulumi-datarobot>=0.12.6",
 ]
 
 [tool.uv]
@@ -115,7 +108,7 @@ pre_bump_hooks = [
 
 [tool.ty]
 environment.python-version = "3.13"
-environment.extra-paths = ["scripts", "deploy"]
+environment.extra-paths = ["scripts"]
 
 [tool.ty.src]
 exclude = ["build/", "dist/"]

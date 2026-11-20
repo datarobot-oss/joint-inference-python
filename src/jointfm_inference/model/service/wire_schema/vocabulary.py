@@ -127,7 +127,6 @@ ROLE_VALUES = described_values(
 DEFAULT_ROLE: Final = "feature"
 
 SERVED_MODALITY: Final = "numeric"
-DEFAULT_CALENDAR_ID: Final = "pandas-default"
 
 PRECISION_VALUES = described_values(
     {
@@ -152,8 +151,9 @@ ERROR_CODE_VALUES = described_values(
         ServiceErrorCode.VALIDATION_ERROR: "The request is malformed or asks "
         "for something the service does not serve; `field` names the offending "
         "field.",
-        ServiceErrorCode.UNSUPPORTED_HEAD_QUERY_COMBINATION: "The mounted head "
-        "cannot answer the requested `query_mode`.",
+        ServiceErrorCode.UNSUPPORTED_HEAD_QUERY_COMBINATION: "In the catalog "
+        "but not sent by this service: the mounted head answers every "
+        "`query_mode`.",
         ServiceErrorCode.UNSUPPORTED_RETURN_MODE: "In the catalog but not sent by "
         "this service: an unserved `return_mode` answers `VALIDATION_ERROR`.",
         ServiceErrorCode.INPUT_SIZE_EXCEEDED: "The request exceeds a service "

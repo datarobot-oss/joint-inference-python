@@ -496,12 +496,8 @@ def test_service_rejects_incomplete_or_non_finite_history(value: float | None) -
 @pytest.mark.parametrize(
     ("descriptor", "field"),
     [
-        pytest.param({"modality": "categorical"}, "columns[1].modality", id="modality"),
-        pytest.param({"role": "static"}, "columns[1].role", id="role"),
-        pytest.param({"nullable": True}, "columns[1].nullable", id="nullable"),
-        pytest.param(
-            {"traits": {"seasonal": "present"}}, "columns[1].traits", id="traits"
-        ),
+        pytest.param({"modality": "text"}, "columns[1].modality", id="modality"),
+        pytest.param({"role": "other"}, "columns[1].role", id="role"),
         pytest.param({"unit": "kg"}, "columns[1]", id="unknown-key"),
     ],
 )
@@ -518,40 +514,15 @@ def test_service_refuses_column_descriptors_it_does_not_serve(
     assert error.field == field
 
 
-def test_service_accepts_column_descriptors_at_their_defaults() -> None:
+def test_service_refuses_a_request_key_it_does_not_read() -> None:
+    """An unknown top-level key is refused rather than dropped."""
     request = _request_payload()
-    request["columns"][1].update(
-        {
-            "nullable": False,
-            "traits": {},
-            "time_value_use_local_normalized_time": False,
-            "time_value_calendar_id": "pandas-default",
-        }
-    )
-
-    assert _service().predict(request)["outputs"]["mean"] == [[200.0], [201.0]]
-
-
-@pytest.mark.parametrize(
-    ("key", "value"),
-    [("use_local_normalized_time", True), ("calendar_id", "business-days")],
-)
-def test_service_refuses_time_options_it_does_not_serve(key: str, value: Any) -> None:
-    request = _request_payload()
-    request[key] = value
+    request["locale"] = "de-DE"
 
     error = _refusal(_service(), request)
 
     assert error.code == "VALIDATION_ERROR"
-    assert error.field == key
-
-
-def test_service_accepts_time_options_at_their_defaults() -> None:
-    request = _request_payload()
-    request["use_local_normalized_time"] = False
-    request["calendar_id"] = "pandas-default"
-
-    assert _service().predict(request)["outputs"]["mean"] == [[200.0], [201.0]]
+    assert error.field == "locale"
 
 
 def test_service_reads_time_scale_and_timezone_for_absolute_datetime() -> None:
@@ -592,7 +563,6 @@ def test_health_payload_reports_the_served_jointfm_1_contract() -> None:
         "decoding_strategy": "parallel_dense",
         "supported_query_modes": ["forecast", "condition"],
         "supported_condition_kinds": ["equality", "interval"],
-        "supported_metadata_traits": [],
         "supported_return_modes": ["log_prob", "mean", "quantiles", "samples"],
         "supported_time_index_modes": [
             "absolute_datetime",

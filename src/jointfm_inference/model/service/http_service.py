@@ -61,7 +61,7 @@ from .column_specs import (
     _parse_column_specs,
     _resolve_requested_columns,
 )
-from .conditions import parse_conditions, supported_condition_kinds
+from .conditions import parse_conditions
 from .config import InferenceServiceConfig, default_max_request_bytes
 from .data_frames import _history_frame, _log_prob_values_tensor, _query_rows_frame
 from .errors import ServiceError, ServiceErrorCode
@@ -79,7 +79,6 @@ from .serialization import (
 )
 from .time_conversion import _serialize_query_times
 from .validation import (
-    _optional_bool,
     _optional_float,
     _optional_int,
     _optional_string,
@@ -88,7 +87,7 @@ from .validation import (
     _require_string,
 )
 from .wire_schema import (
-    DEFAULT_CALENDAR_ID,
+    CONDITION_KINDS,
     DEFAULT_QUERY_MODE,
     DEFAULT_REQUEST_TYPE,
     DEFAULT_RETURN_MODE,
@@ -129,14 +128,7 @@ class JointFMHTTPService:
         self._device = torch.device(config.device)
         self._head_name = session.backend.head_name
         self._supported_return_modes = session.backend.supported_return_modes
-        # The advertisement and the pre-execution gate read one derived answer
-        # rather than a hardcoded list.
-        self._supported_condition_kinds = supported_condition_kinds(
-            supports_conditioning=session.backend.supports_conditioning
-        )
-        self._supported_query_modes = (QUERY_MODE_FORECAST,) + (
-            (QUERY_MODE_CONDITION,) if self._supported_condition_kinds else ()
-        )
+        self._supported_query_modes = (QUERY_MODE_FORECAST, QUERY_MODE_CONDITION)
         self._serviceable_time_index_modes = (
             frozenset(session.time_index_support.supported_request_time_index_modes)
             & TIME_INDEX_MODES
@@ -169,8 +161,7 @@ class JointFMHTTPService:
         Includes identity fields, the model ``precision`` every forward runs
         at, the advertised query, return, and time-index modes, the mounted
         model's ``decoding_strategy``, and the per-column ``tail_map`` its
-        head applies (``'none'`` without one). ``supported_metadata_traits``
-        lists the expert-hint traits a column descriptor may carry.
+        head applies (``'none'`` without one).
         ``max_request_bytes`` is the largest request body the service reads,
         so a client can check a request's size before uploading it.
         """
@@ -190,8 +181,7 @@ class JointFMHTTPService:
             "tail_map": self._session.backend.tail_map,
             "decoding_strategy": self._session.decoding_strategy,
             "supported_query_modes": list(self._supported_query_modes),
-            "supported_condition_kinds": list(self._supported_condition_kinds),
-            "supported_metadata_traits": list(self._session.metadata_traits),
+            "supported_condition_kinds": list(CONDITION_KINDS),
             "supported_return_modes": sorted(self._supported_return_modes),
             "supported_time_index_modes": sorted(self._serviceable_time_index_modes),
             "time_index_encoding": time_index_support.encoding,
@@ -315,17 +305,6 @@ class JointFMHTTPService:
             )
 
         query_mode = request_payload.get("query_mode", DEFAULT_QUERY_MODE)
-        if query_mode == QUERY_MODE_CONDITION and not self._supported_condition_kinds:
-            raise ServiceError(
-                ServiceErrorCode.UNSUPPORTED_HEAD_QUERY_COMBINATION,
-                (
-                    f"The mounted {self._head_name!r} head on the "
-                    f"{self._session.generation!r} generation cannot answer condition "
-                    "queries; /healthz advertises the modes it serves"
-                ),
-                status=HTTPStatus.BAD_REQUEST,
-                field="query_mode",
-            )
         if query_mode not in self._supported_query_modes:
             raise ServiceError(
                 ServiceErrorCode.VALIDATION_ERROR,
@@ -417,28 +396,6 @@ class JointFMHTTPService:
             time_index_mode=time_index_mode,
             time_column=time_column,
         )
-
-        if _optional_bool(
-            request_payload.get("use_local_normalized_time"),
-            field="use_local_normalized_time",
-            default=False,
-        ):
-            raise ServiceError(
-                "VALIDATION_ERROR",
-                "use_local_normalized_time is not served; omit it or pass false",
-                status=HTTPStatus.BAD_REQUEST,
-                field="use_local_normalized_time",
-            )
-        calendar_id = _optional_string(
-            request_payload.get("calendar_id"), field="calendar_id"
-        )
-        if calendar_id is not None and calendar_id != DEFAULT_CALENDAR_ID:
-            raise ServiceError(
-                "VALIDATION_ERROR",
-                f"calendar_id is not served; omit it or pass {DEFAULT_CALENDAR_ID!r}",
-                status=HTTPStatus.BAD_REQUEST,
-                field="calendar_id",
-            )
 
         try:
             schema = DataFrameSchema(
@@ -674,9 +631,8 @@ class JointFMHTTPService:
             minimum, maximum = _sampling_bound_tensors(
                 column_specs, device=self._device
             )
-            # The capability gate at the top of the request path already refused
-            # any backend whose result cannot condition, so the narrowing is the
-            # gate's conclusion rather than a second guess at it.
+            # The served Student-t mixture has a closed-form conditional, so every
+            # result conditions, as /healthz advertises.
             conditional = cast(ConditionalDistributionResult, result)
             read_outs: dict[int, ConditionalReadOut] = {}
             for request in condition_requests:
