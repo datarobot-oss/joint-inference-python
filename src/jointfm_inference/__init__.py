@@ -12,8 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Inference runner that serves JointFM checkpoints over HTTP."""
+"""Inference runner that serves JointFM checkpoints over HTTP.
+
+``LocalService`` starts a service from Python for the length of a ``with``
+block, configured by ``ServiceSettings``; importing either loads neither torch
+nor the model.
+"""
 
 from importlib.metadata import version
 
+from jointfm_inference.local_service import LocalService, LocalServiceError
+from jointfm_inference.service_settings import ServiceSettings
+
 __version__ = version("jointfm-inference")
+
+__all__ = ["LocalService", "LocalServiceError", "ServiceSettings", "__version__"]

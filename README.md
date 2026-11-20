@@ -30,7 +30,7 @@
   </a>
 </p>
 
-`jointfm-inference` is the inference runner for JointFM: it loads JointFM checkpoints and serves joint probabilistic forecasts over HTTP. Applications talk to a running instance through the [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python) SDK ([PyPI](https://pypi.org/project/jointfm-client/)).
+`jointfm-inference` is the inference runner for JointFM: it loads JointFM checkpoints and serves joint probabilistic forecasts over HTTP. Applications talk to a running instance through the [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python) SDK ([PyPI](https://pypi.org/project/jointfm-client/)). The service runs on its own, started by `jointfm-inference serve` or the container image, or your application starts and stops it from Python, with this package installed beside the client ([Start from Python](#start-from-python)); then there is no separate service to run.
 
 The repository holds the serving code for JointFM 1 checkpoints, the `jointfm-inference` command, and a container image. Neither the package nor the image contains weights: every service names the checkpoint it serves in its own configuration.
 
@@ -48,7 +48,7 @@ The repository holds the serving code for JointFM 1 checkpoints, the `jointfm-in
    pip install jointfm-inference
    ```
 
-4. **Serve the weights file**; [Configuration](#configuration) lists every other setting, such as the GPU to run on:
+4. **Serve the weights file** from a shell, or let your application start the service instead, as [Start from Python](#start-from-python) shows. [Configuration](#configuration) lists every other setting, such as the GPU to run on:
 
    ```sh
    JOINTFM_INFERENCE_CHECKPOINT_PATH=/path/to/weights.pt jointfm-inference serve   # stop with Ctrl-C
@@ -75,6 +75,37 @@ task probe              # from a second shell
 ```
 
 In `.env`, set `JOINTFM_INFERENCE_CHECKPOINT_PATH` to the weights file, or to where it should be downloaded together with `JOINTFM_INFERENCE_CHECKPOINT_URL` and `JOINTFM_INFERENCE_CHECKPOINT_SHA256`.
+
+## Start from Python
+
+An application can serve the weights itself, with this package and the client installed in its own environment, instead of running a separate service. `LocalService` starts the service as a child process of the application's interpreter when its `with` block begins, returns once the service answers its health check, and stops it when the block ends, also when the block raises:
+
+```sh
+pip install jointfm-inference jointfm-client
+```
+
+```python
+from jointfm_client import JointFMClient
+from jointfm_inference import LocalService, ServiceSettings
+
+settings = ServiceSettings(checkpoint_path="/path/to/weights.pt", device="cuda:0")
+with LocalService(settings) as service:
+    client = JointFMClient.from_env(
+        env={
+            "JOINTFM_LOCAL_BASE_URL": service.base_url,
+            "JOINTFM_SCHEMA_VERSION": "v6",
+        },
+        dotenv_path=None,
+        config_path=None,
+    )
+    print(client.health())  # forecast as the client's README shows
+```
+
+- **Settings.** `ServiceSettings` has one field per variable in [Configuration](#configuration), named after it in lower case (`device` for `JOINTFM_INFERENCE_DEVICE`); a field left unset keeps that variable's default. Only these settings configure the service: the application's own `JOINTFM_INFERENCE_*` variables do not reach it. The service checks every value when it starts.
+- **Address.** `jointfm-inference serve` listens on every network interface by default, but `LocalService` listens on the loopback address unless `bind_host` says otherwise, and on a free port unless `port` names one; `service.base_url` is where it answers. The service has no authentication, so binding it to another interface opens it to that network.
+- **Failures.** Starting raises `LocalServiceError` when the service exits before it answers or does not answer within `ready_timeout_seconds`, by default long enough to download the weights first; the message ends with the service's last lines of output, which say why. That output goes to a temporary file removed when the block ends, or is appended to `log_path`.
+- **Stopping.** Leaving the block sends the service SIGTERM and kills it if it is still running after `stop_timeout_seconds`. An application killed without unwinding, as by SIGKILL, leaves the service running.
+- **Environment.** This package needs Python 3.13 or newer, the client 3.11 or newer, so the application needs 3.13. Importing `jointfm_inference` loads neither torch nor the model into the application; only the service process does.
 
 ## Hardware
 

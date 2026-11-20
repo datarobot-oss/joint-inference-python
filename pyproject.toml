@@ -31,7 +31,7 @@ dependencies = [
     "orjson>=3.11",
     "pandas",
     "scipy",
-    "torch==2.15.0",
+    "torch>=2.15.0",
 ]
 
 [project.urls]
