@@ -1,3 +1,9 @@
+## v0.10.1 (2026-11-21)
+
+### Fix
+
+- Refuse a sample bound that redraws cannot meet with a 400 VALIDATION_ERROR on its column's lower_bound or upper_bound instead of an INTERNAL_ERROR, raise UnmetSampleBoundError from PredictorAdapter.sample naming that bound, and document in the wire schema how bounds redraw, what a seed reproduces, and what parallel_dense decoding means
+
 ## v0.10.0 (2026-11-20)
 
 ### Feat
