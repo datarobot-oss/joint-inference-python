@@ -1026,7 +1026,7 @@
                 "type": "null"
               }
             ],
-            "description": "Seeds the service's random draws, so the same request with the same seed returns the same answer; omitted or `null`, draws differ per request."
+            "description": "Seeds the service's random draws. The same request with the same seed returns the same answer while `/healthz` reports the same `checkpoint_version`, `image_version`, `device`, and `precision`. `requested_columns` only selects among the draws, so changing it leaves the columns still returned unchanged; changing anything else, `n_samples` included, can change every draw. Omitted or `null`, draws differ per request."
           }
         },
         "required": [
@@ -1225,7 +1225,7 @@
                 "type": "null"
               }
             ],
-            "description": "A lower bound every sampled draw of the column respects; at most `upper_bound`."
+            "description": "A lower bound every sampled draw of the column respects; at most `upper_bound`. Read only for `samples`: a draw outside the bound is replaced by a fresh draw, across all columns of its position at once, so the draws follow the joint distribution restricted to the bounds. A bound that draws still miss after 100 redraws is refused with `VALIDATION_ERROR` on this field."
           },
           "upper_bound": {
             "anyOf": [
@@ -1236,7 +1236,7 @@
                 "type": "null"
               }
             ],
-            "description": "An upper bound every sampled draw of the column respects."
+            "description": "An upper bound every sampled draw of the column respects. Read only for `samples`: a draw outside the bound is replaced by a fresh draw, across all columns of its position at once, so the draws follow the joint distribution restricted to the bounds. A bound that draws still miss after 100 redraws is refused with `VALIDATION_ERROR` on this field."
           }
         },
         "required": [
@@ -2348,7 +2348,7 @@
           },
           "decoding_strategy": {
             "type": "string",
-            "description": "How the served model decodes forecast horizons."
+            "description": "How the served model decodes future positions. A JointFM 1 model reports `parallel_dense`: one forward emits the joint distribution of every position, and each position is drawn on its own, so a draw is joint across the columns of a position and independent across positions."
           },
           "supported_query_modes": {
             "type": "array",
@@ -2509,7 +2509,7 @@
               "MODEL_VERSION_MISMATCH",
               "INTERNAL_ERROR"
             ],
-            "description": "What went wrong, as a value a client can branch on.\n\n- `VALIDATION_ERROR`: The request is malformed or asks for something the service does not serve; `field` names the offending field.\n- `UNSUPPORTED_HEAD_QUERY_COMBINATION`: In the catalog but not sent by this service: the mounted head answers every `query_mode`.\n- `UNSUPPORTED_RETURN_MODE`: In the catalog but not sent by this service: an unserved `return_mode` answers `VALIDATION_ERROR`.\n- `INPUT_SIZE_EXCEEDED`: The request exceeds a service cap: `n_samples` above `max_sample_count`, or a body above `max_request_bytes`. `requested` and `allowed` carry both sizes.\n- `SCHEMA_VERSION_MISMATCH`: `schema_version` differs from the version the service speaks.\n- `MODEL_VERSION_MISMATCH`: `model_version` differs from the version the service serves.\n- `INTERNAL_ERROR`: The service failed on a request it accepted."
+            "description": "What went wrong, as a value a client can branch on.\n\n- `VALIDATION_ERROR`: The request is malformed, asks for something the service does not serve, or asks for values the forecast puts almost no probability on, such as draws inside a column bound far from it; `field` names the offending field.\n- `UNSUPPORTED_HEAD_QUERY_COMBINATION`: In the catalog but not sent by this service: the mounted head answers every `query_mode`.\n- `UNSUPPORTED_RETURN_MODE`: In the catalog but not sent by this service: an unserved `return_mode` answers `VALIDATION_ERROR`.\n- `INPUT_SIZE_EXCEEDED`: The request exceeds a service cap: `n_samples` above `max_sample_count`, or a body above `max_request_bytes`. `requested` and `allowed` carry both sizes.\n- `SCHEMA_VERSION_MISMATCH`: `schema_version` differs from the version the service speaks.\n- `MODEL_VERSION_MISMATCH`: `model_version` differs from the version the service serves.\n- `INTERNAL_ERROR`: The service failed on a request it accepted."
           },
           "message": {
             "type": "string",

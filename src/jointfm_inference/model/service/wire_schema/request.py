@@ -26,6 +26,7 @@ from typing import Any, Final
 
 from jointfm_inference.data.time_index import DEFAULT_ABSOLUTE_DATETIME_SCALE_SECONDS
 from jointfm_inference.data.types import TIME_INDEX_MODES
+from jointfm_inference.model.inference.adapter import DEFAULT_MAX_REDRAWS
 
 from ..constants import DEFAULT_SCHEMA_VERSION
 from .fields import (
@@ -56,6 +57,14 @@ from .vocabulary import (
 
 _NAME: Final[Mapping[str, Any]] = {"type": "string", "minLength": 1}
 _NUMBER: Final[Mapping[str, Any]] = {"type": "number"}
+# What a declared bound does to a draw, the same for a lower and an upper bound.
+_BOUND_REDRAW_RULE: Final = (
+    "Read only for `samples`: a draw outside the bound is replaced by a fresh "
+    "draw, across all columns of its position at once, so the draws follow the "
+    "joint distribution restricted to the bounds. A bound that draws still "
+    f"miss after {DEFAULT_MAX_REDRAWS} redraws is refused with "
+    "`VALIDATION_ERROR` on this field."
+)
 QUERY_TIME_INDICES_FIELD: Final = "query_time_indices"
 
 COLUMN_DESCRIPTOR_FIELDS: Final = (
@@ -84,12 +93,13 @@ COLUMN_DESCRIPTOR_FIELDS: Final = (
         "lower_bound",
         nullable(_NUMBER),
         "A lower bound every sampled draw of the column respects; at most "
-        "`upper_bound`.",
+        f"`upper_bound`. {_BOUND_REDRAW_RULE}",
     ),
     WireField(
         "upper_bound",
         nullable(_NUMBER),
-        "An upper bound every sampled draw of the column respects.",
+        "An upper bound every sampled draw of the column respects. "
+        f"{_BOUND_REDRAW_RULE}",
     ),
 )
 COLUMN_DESCRIPTOR_FIELD_NAMES: Final = field_names(COLUMN_DESCRIPTOR_FIELDS)
@@ -306,9 +316,13 @@ PREDICT_REQUEST_FIELDS: Final = (
     WireField(
         "seed",
         nullable({"type": "integer"}),
-        "Seeds the service's random draws, so the same request with the same "
-        "seed returns the same answer; omitted or `null`, draws differ per "
-        "request.",
+        "Seeds the service's random draws. The same request with the same seed "
+        "returns the same answer while `/healthz` reports the same "
+        "`checkpoint_version`, `image_version`, `device`, and `precision`. "
+        "`requested_columns` only selects among the draws, so changing it "
+        "leaves the columns still returned unchanged; changing anything else, "
+        "`n_samples` included, can change every draw. Omitted or `null`, draws "
+        "differ per request.",
     ),
 )
 REQUEST_FIELDS: Final = field_names(PREDICT_REQUEST_FIELDS)

@@ -15,8 +15,8 @@
 """Sample rejection bound helpers used by ``PredictorAdapter.sample``.
 
 Normalizes user-supplied ``min_value``/``max_value`` arguments to the sample
-device/dtype, computes per-sample violation masks, and produces compact error
-fragments for rejection-sampling failures.
+device/dtype, computes per-sample violation masks, and builds the error for
+draws that redraws could not bring inside the bounds.
 """
 
 from __future__ import annotations
@@ -81,3 +81,91 @@ def _bound_error_fragment(field: str, bound: torch.Tensor) -> str:
     if bound.numel() == 1:
         return f" {field}={float(bound.item())} violation."
     return f" {field} violation."
+
+
+class UnmetSampleBoundError(RuntimeError):
+    """Draws still fall outside a sample bound after every redraw.
+
+    The distribution puts too little probability inside the bound for redraws
+    to fill the requested draws, and drawing again does not change that, so
+    the bound is what has to give. A caller that forwards the bound from a
+    request reads which one from the attributes.
+
+    Attributes:
+        argument: ``"min_value"`` or ``"max_value"``, the argument the bound
+            was passed as.
+        column: The bound's column, an index on the last axis of the draws.
+        bound: The bound's value in that column.
+        failing: How many of the column's draws still miss the bound.
+        total: How many draws the column has.
+        redraws: The redraw rounds taken before giving up.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        argument: str,
+        column: int,
+        bound: float,
+        failing: int,
+        total: int,
+        redraws: int,
+    ) -> None:
+        """Record the message and the bound the draws still miss."""
+        super().__init__(message)
+        self.argument = argument
+        self.column = column
+        self.bound = bound
+        self.failing = failing
+        self.total = total
+        self.redraws = redraws
+
+
+def _redraw_failure(
+    message: str,
+    samples: torch.Tensor,
+    *,
+    min_value: torch.Tensor | None,
+    max_value: torch.Tensor | None,
+    redraws: int,
+) -> RuntimeError:
+    """Return the error for draws that still break a constraint after the redraws.
+
+    ``samples`` are the ``(B, S, H, D)`` draws left after the last redraw.
+    Every cell still below ``min_value`` or above ``max_value`` counts against
+    its column's bound on that side. A draw is replaced across all its columns
+    at once, so a merely tight bound beside an unmeetable one also fails in
+    some cells of the draws the unmeetable one keeps rejecting; the bound with
+    the most failing cells is the one the distribution puts too little
+    probability inside, and an :class:`UnmetSampleBoundError` names it. When
+    no cell breaks a bound, only NaN draws remain, which no bound explains,
+    and the error is a plain ``RuntimeError``.
+    """
+    sides: list[tuple[str, torch.Tensor, torch.Tensor]] = []
+    if min_value is not None:
+        lower = torch.broadcast_to(min_value, samples.shape)
+        sides.append(("min_value", lower, samples < lower))
+    if max_value is not None:
+        upper = torch.broadcast_to(max_value, samples.shape)
+        sides.append(("max_value", upper, samples > upper))
+    if not sides:
+        return RuntimeError(message)
+    counts = torch.stack(
+        [violated.flatten(end_dim=-2).sum(dim=0) for _, _, violated in sides]
+    )
+    side, column = divmod(int(counts.argmax().item()), samples.shape[-1])
+    failing = int(counts[side, column].item())
+    if failing == 0:
+        return RuntimeError(message)
+    argument, bound, violated = sides[side]
+    column_violated = violated[..., column]
+    return UnmetSampleBoundError(
+        message,
+        argument=argument,
+        column=column,
+        bound=float(bound[..., column][column_violated][0].item()),
+        failing=failing,
+        total=column_violated.numel(),
+        redraws=redraws,
+    )

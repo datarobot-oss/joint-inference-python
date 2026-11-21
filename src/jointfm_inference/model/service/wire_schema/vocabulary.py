@@ -148,9 +148,10 @@ TIME_INDEX_ENCODING_VALUES = (
 
 ERROR_CODE_VALUES = described_values(
     {
-        ServiceErrorCode.VALIDATION_ERROR: "The request is malformed or asks "
-        "for something the service does not serve; `field` names the offending "
-        "field.",
+        ServiceErrorCode.VALIDATION_ERROR: "The request is malformed, asks for "
+        "something the service does not serve, or asks for values the forecast "
+        "puts almost no probability on, such as draws inside a column bound "
+        "far from it; `field` names the offending field.",
         ServiceErrorCode.UNSUPPORTED_HEAD_QUERY_COMBINATION: "In the catalog "
         "but not sent by this service: the mounted head answers every "
         "`query_mode`.",

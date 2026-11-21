@@ -294,6 +294,63 @@ def test_service_applies_one_sided_column_bounds_to_samples() -> None:
     assert samples[..., 0].min() < 0.0
 
 
+@pytest.mark.parametrize(
+    ("bound_field", "location", "direction"),
+    [("lower_bound", -100.0, "below"), ("upper_bound", 100.0, "above")],
+)
+def test_service_refuses_a_bound_the_forecast_puts_no_draws_inside(
+    bound_field: str, location: float, direction: str
+) -> None:
+    """A bound the redraws cannot meet is the request's to change, named by its field.
+
+    Reported as a server error, it would read as a fault of the service and be
+    retried, although every retry draws from the same forecast.
+    """
+    service = _service(
+        _FixedParameterJointFM(column_locations=(0.0, location), scale=0.1)
+    )
+    request = _request_payload()
+    request["return_mode"] = "samples"
+    request["n_samples"] = 8
+    request["columns"][1][bound_field] = 0.0
+
+    error = _refusal(service, request)
+
+    assert error.code == "VALIDATION_ERROR"
+    assert error.status == 400
+    assert error.field == f"columns[1].{bound_field}"
+    assert f"16 of 16 draws of that column still fall {direction} it" in error.message
+
+
+def test_a_seeded_sample_request_returns_the_same_draws_again() -> None:
+    """The seed fixes the draws, redrawn ones included; another seed moves them."""
+    service = _service(_FixedParameterJointFM(column_locations=(0.0, 0.0), scale=1.0))
+    request = _request_payload()
+    request["return_mode"] = "samples"
+    request["n_samples"] = 32
+    request["columns"][1]["lower_bound"] = 0.0
+
+    first = service.predict(request)["outputs"]["samples"]
+
+    assert service.predict(request)["outputs"]["samples"] == first
+    assert service.predict({**request, "seed": 8})["outputs"]["samples"] != first
+
+
+def test_requested_columns_select_from_the_same_draws() -> None:
+    """A request draws every declared column jointly, whichever columns it returns."""
+    service = _service(_FixedParameterJointFM(column_locations=(0.0, 0.0), scale=1.0))
+    request = _request_payload()
+    request["return_mode"] = "samples"
+    request["n_samples"] = 32
+    request["requested_columns"] = ["known_feature", "target"]
+    both = np.asarray(service.predict(request)["outputs"]["samples"])
+
+    request["requested_columns"] = ["target"]
+    target_alone = np.asarray(service.predict(request)["outputs"]["samples"])
+
+    np.testing.assert_array_equal(target_alone[..., 0], both[..., 1])
+
+
 def test_service_rejects_time_column_declared_in_columns() -> None:
     request = _request_payload()
     request["columns"].insert(0, {"name": "timestamp", "modality": "numeric"})

@@ -36,6 +36,7 @@ from jsonschema.protocols import Validator
 import pytest
 
 from jointfm_inference.cli import main
+from jointfm_inference.model.inference.jointfm_1_backend import DECODING_STRATEGY
 from jointfm_inference.model.service import JointFMHTTPService, ServiceError
 from jointfm_inference.model.service.http_handler import _handler_class
 from jointfm_inference.model.service.wire_schema import (
@@ -297,6 +298,15 @@ def test_a_request_field_the_service_refuses_fails_the_document() -> None:
     errors = list(_REQUEST.iter_errors(_example(horizon=3)))
 
     assert errors
+
+
+def test_the_document_explains_the_decoding_strategy_a_jointfm_1_service_reports() -> (
+    None
+):
+    """The description names the backend's value, which it cannot import."""
+    health = _DOCUMENT["components"]["schemas"]["HealthResponse"]["properties"]
+
+    assert f"`{DECODING_STRATEGY}`" in health["decoding_strategy"]["description"]
 
 
 @pytest.mark.parametrize(

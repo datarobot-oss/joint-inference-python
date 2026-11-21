@@ -166,7 +166,11 @@ HEALTH_FIELDS: Final = _all_required(
     WireField(
         "decoding_strategy",
         _STRING,
-        "How the served model decodes forecast horizons.",
+        "How the served model decodes future positions. A JointFM 1 model "
+        "reports `parallel_dense`: one forward emits the joint "
+        "distribution of every position, and each position is drawn on its "
+        "own, so a draw is joint across the columns of a position and "
+        "independent across positions.",
     ),
     WireField(
         "supported_query_modes",

@@ -612,6 +612,25 @@ def test_declared_bounds_filter_the_drawn_read_out_columns() -> None:
         assert target >= 0.0
 
 
+def test_a_bound_the_conditional_cannot_meet_is_refused_on_its_request_column() -> None:
+    """The refusal names the column's place in the request, not in the read-out.
+
+    The driver is pinned at both positions, so the target is the read-out's
+    only column and its first, while the request declares it second.
+    """
+    service, _ = service_and_model()
+    columns = bounded_columns("driver", "target")
+    columns[1]["lower_bound"] = 1e6
+    payload = make_payload(columns=columns, return_mode="samples", n_samples=8)
+    payload["conditions"][0]["query_time_indices"] = [0, 1]
+
+    with pytest.raises(ServiceError) as raised:
+        service.predict(payload)
+
+    assert raised.value.code == "VALIDATION_ERROR"
+    assert raised.value.field == "columns[1].lower_bound"
+
+
 def test_quantiles_cover_the_requested_read_out_column() -> None:
     """Quantiles come back for the request's read-out column alone, in order."""
     service, _ = service_and_model()

@@ -49,6 +49,7 @@ from jointfm_inference.model.inference import (
     InferenceDistributionResult,
     InferenceRequestError,
     JointFMInferenceSession,
+    UnmetSampleBoundError,
 )
 from jointfm_inference.model.inference.conditional_query import (
     ConditionRequest,
@@ -215,8 +216,8 @@ class JointFMHTTPService:
         the requested forecast payload: means, samples, quantiles, or
         log-probability scores. Sample count and quantile requests are bounded
         by service constants, optional seeds make stochastic sampling
-        reproducible, and generated values are clipped to column bounds when
-        the canonical metadata declares them.
+        reproducible, and samples outside a column's declared bounds are
+        redrawn; a bound the redraws cannot meet is refused on its field.
         Validation failures raise ``ServiceError`` with an HTTP status and field
         context; unexpected adapter failures propagate as internal service
         errors at the API boundary.
@@ -548,7 +549,13 @@ class JointFMHTTPService:
         sample_count: int,
         rng: torch.Generator | None,
     ) -> torch.Tensor:
-        """Answer one return mode over every future position, unconditionally."""
+        """Answer one return mode over every future position, unconditionally.
+
+        Raises:
+            ServiceError: with ``VALIDATION_ERROR`` on a column's
+                ``lower_bound`` or ``upper_bound`` when the redraws leave that
+                bound unmet.
+        """
         if return_mode == "mean":
             return result.mean(n_samples=sample_count, rng=rng)
         if return_mode == "samples":
@@ -556,12 +563,16 @@ class JointFMHTTPService:
                 column_specs,
                 device=self._device,
             )
-            return result.samples(
-                n_samples=sample_count,
-                rng=rng,
-                min_value=sample_min_value,
-                max_value=sample_max_value,
-            )
+            try:
+                return result.samples(
+                    n_samples=sample_count,
+                    rng=rng,
+                    min_value=sample_min_value,
+                    max_value=sample_max_value,
+                )
+            except UnmetSampleBoundError as error:
+                # The result draws over the request's columns in declared order.
+                raise _unmet_bound_refusal(error, column=error.column) from error
         if return_mode == "quantiles":
             return result.quantiles(q=quantiles, n_samples=sample_count, rng=rng)
         if return_mode == "log_prob":
@@ -606,9 +617,10 @@ class JointFMHTTPService:
 
         Raises:
             ServiceError: with ``VALIDATION_ERROR`` on field ``conditions``
-                when the library rejects a resolved request, and on field
+                when the library rejects a resolved request, on field
                 ``query_rows`` when a scored row contradicts the condition
-                covering its position.
+                covering its position, and on a column's ``lower_bound`` or
+                ``upper_bound`` when the redraws leave that bound unmet.
         """
         covered = {request.horizon for request in condition_requests}
         with CudaTimer(READOUT_STAGE, self._device):
@@ -717,6 +729,35 @@ class JointFMHTTPService:
 # ``(B, H)`` for scores.
 _HORIZON_AXIS = {"mean": 1, "samples": 2, "quantiles": 2, "log_prob": 1}
 
+# For each sampling bound argument, the column field a request declares the
+# bound in and the side of the bound on which a draw that misses it falls.
+_BOUND_FIELDS = {
+    "min_value": ("lower_bound", "below"),
+    "max_value": ("upper_bound", "above"),
+}
+
+
+def _unmet_bound_refusal(error: UnmetSampleBoundError, *, column: int) -> ServiceError:
+    """Return the refusal for a column bound the redraws left unmet.
+
+    ``column`` is the bound's column as the request declares it; a conditional
+    read-out numbers its own columns differently. The forecast puts too little
+    probability inside the bound, which no further draw changes, so the
+    refusal names the bound's field for the caller to widen or drop instead of
+    reporting a service fault that a client would retry.
+    """
+    bound_field, direction = _BOUND_FIELDS[error.argument]
+    field = f"columns[{column}].{bound_field}"
+    return ServiceError(
+        ServiceErrorCode.VALIDATION_ERROR,
+        f"cannot draw samples within {field} = {error.bound:g}: after "
+        f"{error.redraws} redraws, {error.failing} of {error.total} draws of "
+        f"that column still fall {direction} it, so the forecast puts too little "
+        "probability inside the bound; widen or drop the bound",
+        status=HTTPStatus.BAD_REQUEST,
+        field=field,
+    )
+
 
 def _read_out_tensor(
     read_out: ConditionalReadOut,
@@ -726,11 +767,23 @@ def _read_out_tensor(
     log_prob_values: torch.Tensor | None,
     horizon: int,
 ) -> torch.Tensor:
-    """Answer one return mode at one covered position, one position wide."""
+    """Answer one return mode at one covered position, one position wide.
+
+    Raises:
+        ServiceError: with ``VALIDATION_ERROR`` on field ``query_rows`` when a
+            scored row contradicts the condition, and on a column's
+            ``lower_bound`` or ``upper_bound`` when the redraws leave that
+            bound unmet.
+    """
     if return_mode == "mean":
         return read_out.mean()
     if return_mode == "samples":
-        return read_out.samples()
+        try:
+            return read_out.samples()
+        except UnmetSampleBoundError as error:
+            raise _unmet_bound_refusal(
+                error, column=read_out.read_out_columns[error.column]
+            ) from error
     if return_mode == "quantiles":
         return read_out.quantiles(quantiles)
     if return_mode == "log_prob":
