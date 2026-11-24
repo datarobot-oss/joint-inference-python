@@ -33,6 +33,7 @@ SAMPLES = {
     "private-repository-link": "github.com/datarobot/" + "secret-repo",
     "planning-label": "Phase" + " 7",
     "unreleased-generation": "JointFM" + " 2",
+    "table-time-index-mode": "time_index_mode " + "un" + "ordered",
     "credential": "AKIA" + "ABCDEFGHIJKLMNOP",
 }
 PUBLIC_TEXTS = (

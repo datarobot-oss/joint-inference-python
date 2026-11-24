@@ -125,8 +125,8 @@ README says how to freeze a new layout.
 
 This repository is published, so `scripts/leak_guard.py` fails on material that must stay private:
 proprietary file headers, DataRobot object IDs, internal hosts and private addresses, links to
-non-public repositories, planning labels, names of unreleased model generations, and credential
-shapes. It runs as a pre-commit hook over the working tree, as a `commit-msg` hook over each
+non-public repositories, planning labels, names of unreleased model generations, the time index
+mode of table requests, which this runner does not serve, and credential shapes. It runs as a pre-commit hook over the working tree, as a `commit-msg` hook over each
 message, and in CI over the full history, because a published history cannot be cleaned.
 
 Some rules cannot be published because they name what they guard. Maintainers keep those in a
