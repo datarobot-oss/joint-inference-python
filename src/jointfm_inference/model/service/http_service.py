@@ -60,6 +60,7 @@ from jointfm_inference.model.inference.contract import ConditionalDistributionRe
 from .column_specs import (
     ColumnSpec,
     _parse_column_specs,
+    _require_column_count,
     _resolve_requested_columns,
 )
 from .conditions import parse_conditions
@@ -370,6 +371,9 @@ class JointFMHTTPService:
         raw_columns = _require_sequence(
             request_payload.get("columns"),
             field="columns",
+        )
+        _require_column_count(
+            raw_columns, max_series=self._session.capacity_envelope.max_series
         )
         column_specs = _parse_column_specs(raw_columns)
         requested_column_names = _resolve_requested_columns(

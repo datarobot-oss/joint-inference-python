@@ -83,8 +83,11 @@ def _all_required(*entries: WireField) -> tuple[WireField, ...]:
 
 _CAPACITY_ENVELOPE_VALUES = described_values(
     {
-        "min_series": "The fewest columns the model was built for.",
-        "max_series": "The most columns the model was built for.",
+        "min_series": "The fewest columns a training sample of the model "
+        "carried. It describes the training data and limits no request: one "
+        "column is enough.",
+        "max_series": "The most columns the model was built for, and the most "
+        "one request may declare.",
         "t_input": "The time span of the longest history the model was built for.",
         "t_output": "The time span of the furthest horizon the model was built for.",
         "n_input": "The longest history the model was built for, in steps.",

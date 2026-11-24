@@ -512,6 +512,31 @@ def test_service_rejects_times_beyond_the_checkpoint_time_capacity(
     assert exc_info.value.field == field
 
 
+def test_service_refuses_more_columns_than_max_series_before_the_forward() -> None:
+    """One column above ``max_series`` answers 400 with both counts, before the forward."""
+    max_series = int(TINY_CAPACITY_ENVELOPE["max_series"])
+    service, model = _service_and_model()
+    payload = _request_payload()
+    payload["columns"] = [
+        {"name": f"feature_{index}", "modality": "numeric"}
+        for index in range(max_series)
+    ] + [{"name": "target", "modality": "numeric", "role": "target"}]
+    payload["history_rows"] = [
+        {"timestamp": row["timestamp"], "target": row["target"]}
+        | {f"feature_{index}": float(index) + day for index in range(max_series)}
+        for day, row in enumerate(payload["history_rows"])
+    ]
+
+    refusal = _refusal(service, payload)
+
+    assert refusal.code == "INPUT_SIZE_EXCEEDED"
+    assert refusal.status == 400
+    assert refusal.field == "columns"
+    assert refusal.values == {"requested": max_series + 1, "allowed": max_series}
+    assert "max_series" in refusal.message
+    assert model.last_horizons is None
+
+
 def test_service_rejects_query_times_at_the_last_history_time() -> None:
     """A query at the last history time must not silently re-forecast that row."""
     request = _ordinal_payload([0, 1, 2, 3], [3])

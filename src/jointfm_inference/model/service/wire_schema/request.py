@@ -244,8 +244,8 @@ PREDICT_REQUEST_FIELDS: Final = (
         "columns",
         {"type": "array", "items": ref("ColumnDescriptor"), "minItems": 1},
         "The columns of every row, in the order the response reports them by "
-        "default. `/healthz` reports the column counts the model was built for "
-        "in `data_generation`.",
+        "default. More columns than `/healthz` reports as "
+        "`data_generation.max_series` are refused with `INPUT_SIZE_EXCEEDED`.",
         required=True,
     ),
     WireField(

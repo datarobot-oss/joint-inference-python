@@ -23,7 +23,7 @@ from typing import Any, cast
 from jointfm_inference.data.adapters import ColumnSpec
 from jointfm_inference.data.types import ROLES, RoleLiteral
 
-from .errors import ServiceError
+from .errors import ServiceError, ServiceErrorCode
 from .validation import (
     _optional_float,
     _optional_string,
@@ -43,6 +43,33 @@ def _refuse(message: str, *, field: str) -> ServiceError:
     return ServiceError(
         "VALIDATION_ERROR", message, status=HTTPStatus.BAD_REQUEST, field=field
     )
+
+
+def _require_column_count(raw_columns: Sequence[Any], *, max_series: int) -> None:
+    """Refuse a request that declares more columns than the model holds.
+
+    The network's per-column tables and head outputs are sized to
+    ``max_series`` columns, so a wider request cannot run; refusing it here,
+    before any descriptor is parsed, answers with both counts instead of
+    failing inside the forward.
+
+    Raises:
+        ServiceError: ``INPUT_SIZE_EXCEEDED`` (400) on ``columns``, carrying
+            the declared count as ``requested`` and ``max_series`` as
+            ``allowed``.
+    """
+    column_count = len(raw_columns)
+    if column_count > max_series:
+        raise ServiceError(
+            ServiceErrorCode.INPUT_SIZE_EXCEEDED,
+            (
+                "columns exceed the model's max_series: "
+                f"requested {column_count}, max {max_series}"
+            ),
+            status=HTTPStatus.BAD_REQUEST,
+            field="columns",
+            values={"requested": column_count, "allowed": max_series},
+        )
 
 
 def _parse_column_specs(raw_columns: Sequence[Any]) -> list[ColumnSpec]:
