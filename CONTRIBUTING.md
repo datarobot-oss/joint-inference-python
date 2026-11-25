@@ -172,7 +172,10 @@ A release that changes the wire contract (a field, mode, or error code of `POST 
 release that matches it, because the client's version is what users install to reach this
 service. The client copies this release's `openapi.json`, captures its fixtures again from
 `task serve:tiny`, and fails its tests while it does not know a field, mode, or error code the
-document lists; its contributing guide describes the steps.
+document lists; its contributing guide describes the steps. Client releases after 0.16.2 keep
+working with this release meanwhile, because they pass advertised values they do not know and
+refuse only another `schema_version`; so within one `schema_version` a release only adds to the
+contract, and a change older clients cannot follow changes `schema_version`.
 
 ## Maintainers
 
