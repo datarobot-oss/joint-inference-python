@@ -420,6 +420,18 @@ tasks:
         *) echo "FAIL: service exited with status $STATUS"; exit 1 ;;
       esac
 
+  serve:tiny:
+    desc: "Serve an untrained tiny checkpoint on the CPU, from which the client captures its test fixtures (stop with Ctrl-C; port from JOINTFM_INFERENCE_PORT)"
+    cmd: |
+      STATUS=0
+      uv run python -m tests.support.serve_tiny || STATUS=$?
+      # uv reports 130 or 143 when Ctrl-C or SIGTERM stopped it, even though
+      # the service itself shut down cleanly.
+      case "$STATUS" in
+        0|130|143) echo "OK: tiny service stopped" ;;
+        *) echo "FAIL: tiny service exited with status $STATUS"; exit 1 ;;
+      esac
+
   probe:
     desc: "Probe the service that .env configures on this host, or the services named after -- (task probe -- --service-url http://host:8080)"
     dotenv: [.env]

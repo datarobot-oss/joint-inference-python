@@ -50,6 +50,7 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | `task schema` | Regenerate the committed OpenAPI document from the code; a commit hook, so a commit that leaves it stale stops with the rewritten copy unstaged |
 | `task schema:check` | Fail when the committed OpenAPI document differs from the one the code generates, writing nothing |
 | `task serve` | Serve the checkpoint `.env` configures, downloading it first when `.env` names a URL |
+| `task serve:tiny` | Serve an untrained tiny checkpoint on the CPU, without `.env`, from which the client captures its test fixtures |
 | `task probe` | Probe the local service, or the services named after `--` |
 | `task docker:build` | Build the container image, which holds no weights |
 | `task docker:run` | Run the container image on the checkpoint `.env` configures |
@@ -165,6 +166,13 @@ Squash merges use the pull request title as the commit subject on `main`, so the
 
 Maintainers cut releases with `task release` and publish them with `task release:publish`; the
 [Releases section of the README](README.md#releases) describes the process.
+
+A release that changes the wire contract (a field, mode, or error code of `POST /predict` or
+`GET /healthz`) is followed by a [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python)
+release that matches it, because the client's version is what users install to reach this
+service. The client copies this release's `openapi.json`, captures its fixtures again from
+`task serve:tiny`, and fails its tests while it does not know a field, mode, or error code the
+document lists; its contributing guide describes the steps.
 
 ## Maintainers
 
