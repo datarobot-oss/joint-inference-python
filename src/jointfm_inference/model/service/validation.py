@@ -155,20 +155,6 @@ def _optional_string(value: Any, field: str, default: str | None = None) -> str 
     return _require_string(value, field=field)
 
 
-def _optional_bool(value: Any, *, field: str, default: bool) -> bool:
-    """Return an optional boolean field or the provided default value."""
-    if value is None:
-        return default
-    if not isinstance(value, bool):
-        raise ServiceError(
-            "VALIDATION_ERROR",
-            f"{field} must be a boolean",
-            status=HTTPStatus.BAD_REQUEST,
-            field=field,
-        )
-    return value
-
-
 def _optional_int(value: Any, *, field: str) -> int | None:
     """Return an optional integer field when one was supplied in the request."""
     if value is None:

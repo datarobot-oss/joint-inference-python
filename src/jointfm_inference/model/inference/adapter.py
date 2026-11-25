@@ -31,6 +31,7 @@ from ._bounds import (
     _SampleBound,
     _bound_error_fragment,
     _normalize_sample_bound,
+    _redraw_failure,
     _sample_constraint_violations,
 )
 from .conditioning import MixtureCovariance, condition_student_t_mixture
@@ -106,8 +107,10 @@ class PredictorAdapter:
             max_retries: Redraw rounds before a draw outside the bounds raises.
 
         Raises:
-            RuntimeError: when some draw still violates the bounds after
-                ``max_retries`` redraws.
+            UnmetSampleBoundError: when some draw still falls outside a bound
+                after ``max_retries`` redraws; it names the bound most draws
+                miss.
+            RuntimeError: when only NaN draws remain after the redraws.
         """
         samples = self._draw(n_samples, rng)
         lower = _normalize_sample_bound(min_value, samples=samples, field="min_value")
@@ -140,7 +143,13 @@ class PredictorAdapter:
                 error_msg += _bound_error_fragment("max_value", upper)
             if torch.isnan(samples).any():
                 error_msg += " NaN violation."
-            raise RuntimeError(error_msg)
+            raise _redraw_failure(
+                error_msg,
+                samples,
+                min_value=lower,
+                max_value=upper,
+                redraws=max_retries,
+            )
         return samples
 
     def quantiles(self, q: Sequence[float]) -> torch.Tensor:

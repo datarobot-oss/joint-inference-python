@@ -127,7 +127,6 @@ ROLE_VALUES = described_values(
 DEFAULT_ROLE: Final = "feature"
 
 SERVED_MODALITY: Final = "numeric"
-DEFAULT_CALENDAR_ID: Final = "pandas-default"
 
 PRECISION_VALUES = described_values(
     {
@@ -149,16 +148,19 @@ TIME_INDEX_ENCODING_VALUES = (
 
 ERROR_CODE_VALUES = described_values(
     {
-        ServiceErrorCode.VALIDATION_ERROR: "The request is malformed or asks "
-        "for something the service does not serve; `field` names the offending "
-        "field.",
-        ServiceErrorCode.UNSUPPORTED_HEAD_QUERY_COMBINATION: "The mounted head "
-        "cannot answer the requested `query_mode`.",
+        ServiceErrorCode.VALIDATION_ERROR: "The request is malformed, asks for "
+        "something the service does not serve, or asks for values the forecast "
+        "puts almost no probability on, such as draws inside a column bound "
+        "far from it; `field` names the offending field.",
+        ServiceErrorCode.UNSUPPORTED_HEAD_QUERY_COMBINATION: "In the catalog "
+        "but not sent by this service: the mounted head answers every "
+        "`query_mode`.",
         ServiceErrorCode.UNSUPPORTED_RETURN_MODE: "In the catalog but not sent by "
         "this service: an unserved `return_mode` answers `VALIDATION_ERROR`.",
         ServiceErrorCode.INPUT_SIZE_EXCEEDED: "The request exceeds a service "
-        "cap: `n_samples` above `max_sample_count`, or a body above "
-        "`max_request_bytes`. `requested` and `allowed` carry both sizes.",
+        "cap: `n_samples` above `max_sample_count`, more `columns` than "
+        "`data_generation.max_series`, or a body above `max_request_bytes`. "
+        "`requested` and `allowed` carry both sizes.",
         ServiceErrorCode.SCHEMA_VERSION_MISMATCH: "`schema_version` differs from "
         "the version the service speaks.",
         ServiceErrorCode.MODEL_VERSION_MISMATCH: "`model_version` differs from "
@@ -172,7 +174,8 @@ ERROR_CODE_VALUES = described_values(
 ERROR_VALUE_VALUES = described_values(
     {
         "requested": "The size the request asked for, in the unit of `field`: "
-        "samples for `n_samples`, bytes for `Content-Length`.",
+        "samples for `n_samples`, columns for `columns`, bytes for "
+        "`Content-Length`.",
         "allowed": "The largest size the service accepts, in the same unit.",
     },
     owned=frozenset(name for names in ERROR_VALUE_FIELDS.values() for name in names),

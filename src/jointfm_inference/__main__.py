@@ -12,8 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Pulumi entry point: deploy the inference runner to DataRobot."""
+"""``python -m jointfm_inference`` runs the ``jointfm-inference`` command.
 
-from stack import define_stack
+``LocalService`` starts the service this way, so the service always runs from
+the caller's own environment, not from whichever ``jointfm-inference`` script is first
+on the ``PATH``.
+"""
 
-define_stack()
+from jointfm_inference.cli import main
+
+if __name__ == "__main__":
+    main()

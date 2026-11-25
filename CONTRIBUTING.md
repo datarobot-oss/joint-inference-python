@@ -33,7 +33,6 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | Task | What it does |
 |---|---|
 | `task setup` | Create or reuse `.venv`, sync all dependency groups, install the git hooks, ripgrep, and typos |
-| `task start` | Write `.env` with the DataRobot CLI, which also logs in and fills in the DataRobot endpoint and token |
 | `task run -- <command>` | Run a command inside the project environment |
 | `task test` | Run the unit tests |
 | `task coverage` | Run the unit tests and enforce the coverage floor |
@@ -47,19 +46,17 @@ Run `task pre-commit` and fix every reported issue before opening a pull request
 | `task vuln-scan` | Fail when a package pinned in `uv.lock` has a known vulnerability, scanned by osv-scanner (needs docker) |
 | `task format` | Apply the Ruff formatter |
 | `task pre-commit` | Run every pre-commit hook on all files |
-| `task build` | Build the source distribution and wheel into `dist/` |
+| `task build` | Build the source distribution and wheel into `dist/`, then install the wheel into a fresh environment, serve a test checkpoint from it, and probe every return mode; the publish workflow runs it before every upload |
 | `task schema` | Regenerate the committed OpenAPI document from the code; a commit hook, so a commit that leaves it stale stops with the rewritten copy unstaged |
 | `task schema:check` | Fail when the committed OpenAPI document differs from the one the code generates, writing nothing |
 | `task serve` | Serve the checkpoint `.env` configures, downloading it first when `.env` names a URL |
-| `task deploy:preview`, `task deploy`, `task deploy:destroy` | Preview, apply, or delete the DataRobot Workload serving the checkpoint `.env` configures |
-| `task deploy:outputs`, `task deploy:probe` | Print the deployed Workload's endpoint and IDs, or probe it through DataRobot |
-| `task deploy:bundles` | List the resource bundles the DataRobot cluster offers Workloads |
+| `task serve:tiny` | Serve an untrained tiny checkpoint on the CPU, without `.env`, from which the client captures its test fixtures |
 | `task probe` | Probe the local service, or the services named after `--` |
 | `task docker:build` | Build the container image, which holds no weights |
 | `task docker:run` | Run the container image on the checkpoint `.env` configures |
 | `task release:dry` | Preview the next version and its CHANGELOG entries without changing any file |
 | `task release` | Cut a release: bump the version, write `CHANGELOG.md`, commit, and tag |
-| `task release:publish` | Push the release commit and its tag to `origin` |
+| `task release:publish` | Push the release commit and its tag to `origin`, whose Publish to PyPI workflow then uploads the release |
 
 Every task prints an `OK:` or `FAIL:` line. CI runs the same checks as `task pre-commit`, each as
 its own job named for what it checks, plus `task build`. Only the unit tests run on both Ubuntu and
@@ -129,8 +126,8 @@ README says how to freeze a new layout.
 
 This repository is published, so `scripts/leak_guard.py` fails on material that must stay private:
 proprietary file headers, DataRobot object IDs, internal hosts and private addresses, links to
-non-public repositories, planning labels, names of unreleased model generations, and credential
-shapes. It runs as a pre-commit hook over the working tree, as a `commit-msg` hook over each
+non-public repositories, planning labels, names of unreleased model generations, the time index
+mode of table requests, which this runner does not serve, and credential shapes. It runs as a pre-commit hook over the working tree, as a `commit-msg` hook over each
 message, and in CI over the full history, because a published history cannot be cleaned.
 
 Some rules cannot be published because they name what they guard. Maintainers keep those in a
@@ -169,6 +166,13 @@ Squash merges use the pull request title as the commit subject on `main`, so the
 
 Maintainers cut releases with `task release` and publish them with `task release:publish`; the
 [Releases section of the README](README.md#releases) describes the process.
+
+A release that changes the wire contract (a field, mode, or error code of `POST /predict` or
+`GET /healthz`) is followed by a [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python)
+release that matches it, because the client's version is what users install to reach this
+service. The client copies this release's `openapi.json`, captures its fixtures again from
+`task serve:tiny`, and fails its tests while it does not know a field, mode, or error code the
+document lists; its contributing guide describes the steps.
 
 ## Maintainers
 

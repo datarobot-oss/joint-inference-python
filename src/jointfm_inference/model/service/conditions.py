@@ -48,22 +48,6 @@ from .wire_schema import (
 _CONDITIONS_FIELD = "conditions"
 
 
-def supported_condition_kinds(*, supports_conditioning: bool) -> tuple[str, ...]:
-    """Return the condition kinds the mounted deployment can answer.
-
-    Derived rather than configured, so a deployment cannot advertise a
-    capability its checkpoint does not have. Both kinds arrive together for a
-    backend that can condition at all: the equality step is the head's closed
-    form and the interval step runs on the reduced mixture that step leaves,
-    so no head has one without the other.
-
-    Whether the mounted model conditions at all is not decided here: it is the
-    serving backend's ``supports_conditioning``, so a request cannot be
-    accepted by a guard the advertisement disagrees with.
-    """
-    return CONDITION_KINDS if supports_conditioning else ()
-
-
 def _reject(message: str, *, field: str = _CONDITIONS_FIELD) -> ServiceError:
     """Build one pre-execution rejection for a malformed condition list."""
     return ServiceError(
@@ -260,4 +244,4 @@ def parse_conditions(
     return tuple(requests)
 
 
-__all__ = ["parse_conditions", "supported_condition_kinds"]
+__all__ = ["parse_conditions"]

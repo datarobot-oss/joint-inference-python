@@ -130,11 +130,6 @@ class JointFMInferenceSession:
         return self._precision
 
     @property
-    def metadata_traits(self) -> tuple[str, ...]:
-        """Return the metadata traits the mounted model reads as expert hints."""
-        return self._backend.metadata_traits
-
-    @property
     def time_index_support(self) -> TimeIndexSupport:
         """Return the time-index contract the mounted model reads request times under."""
         return self._backend.time_index_support

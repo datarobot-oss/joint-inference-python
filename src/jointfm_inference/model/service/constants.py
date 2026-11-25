@@ -50,8 +50,8 @@ REQUEST_TIME_CELLS_PER_ROW = 2
 # largest a column and position can carry: the column name, the kind, two
 # full-precision bounds, and a one-element ``query_time_indices``.
 REQUEST_CONDITION_BYTES = 256
-# One column descriptor with its bounds, traits, and categorical mapping, plus
-# the column's ``requested_columns`` entry.
+# One column descriptor with a long name, its role, and both bounds, plus the
+# column's ``requested_columns`` entry.
 REQUEST_COLUMN_BYTES = 4096
 # Every other top-level field: versions, modes, quantiles, the seed.
 REQUEST_BASE_BYTES = 65536

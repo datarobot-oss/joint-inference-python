@@ -126,6 +126,8 @@ PUBLIC_RULES = (
         re.compile(r"(?i)\b(?:phase|milestone|sprint)[\s_-]*\d+[a-z0-9]*\b"),
     ),
     Rule("unreleased-generation", re.compile(r"(?i)\bjoint[\s_-]?fm[\s_-]*2\b")),
+    # The time index mode of table requests, which this runner does not serve.
+    Rule("table-time-index-mode", re.compile(r"\bunordered\b")),
     Rule(
         "credential",
         re.compile(

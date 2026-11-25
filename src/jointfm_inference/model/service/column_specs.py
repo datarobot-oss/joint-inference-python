@@ -23,7 +23,7 @@ from typing import Any, cast
 from jointfm_inference.data.adapters import ColumnSpec
 from jointfm_inference.data.types import ROLES, RoleLiteral
 
-from .errors import ServiceError
+from .errors import ServiceError, ServiceErrorCode
 from .validation import (
     _optional_float,
     _optional_string,
@@ -33,7 +33,6 @@ from .validation import (
 )
 from .wire_schema import (
     COLUMN_DESCRIPTOR_FIELD_NAMES,
-    DEFAULT_ONLY_DESCRIPTOR_VALUES,
     DEFAULT_ROLE,
     SERVED_MODALITY,
 )
@@ -46,14 +45,39 @@ def _refuse(message: str, *, field: str) -> ServiceError:
     )
 
 
+def _require_column_count(raw_columns: Sequence[Any], *, max_series: int) -> None:
+    """Refuse a request that declares more columns than the model holds.
+
+    The network's per-column tables and head outputs are sized to
+    ``max_series`` columns, so a wider request cannot run; refusing it here,
+    before any descriptor is parsed, answers with both counts instead of
+    failing inside the forward.
+
+    Raises:
+        ServiceError: ``INPUT_SIZE_EXCEEDED`` (400) on ``columns``, carrying
+            the declared count as ``requested`` and ``max_series`` as
+            ``allowed``.
+    """
+    column_count = len(raw_columns)
+    if column_count > max_series:
+        raise ServiceError(
+            ServiceErrorCode.INPUT_SIZE_EXCEEDED,
+            (
+                "columns exceed the model's max_series: "
+                f"requested {column_count}, max {max_series}"
+            ),
+            status=HTTPStatus.BAD_REQUEST,
+            field="columns",
+            values={"requested": column_count, "allowed": max_series},
+        )
+
+
 def _parse_column_specs(raw_columns: Sequence[Any]) -> list[ColumnSpec]:
     """Parse request column descriptors into ``ColumnSpec`` objects.
 
-    The service serves numeric columns: ``modality`` must be ``numeric``,
-    ``role`` ``target`` or ``feature``, and every field of
-    ``DEFAULT_ONLY_DESCRIPTOR_VALUES`` absent, ``null``, or at a value it
-    lists. A key outside ``COLUMN_DESCRIPTOR_FIELD_NAMES`` is refused, since
-    reading only known keys would drop a misspelled option silently.
+    ``modality`` must be ``numeric`` and ``role`` ``target`` or ``feature``.
+    A key outside ``COLUMN_DESCRIPTOR_FIELD_NAMES`` is refused, since reading
+    only known keys would drop a misspelled option silently.
 
     Raises:
         ServiceError: ``VALIDATION_ERROR`` for an unknown key, a missing name
@@ -74,8 +98,7 @@ def _parse_column_specs(raw_columns: Sequence[Any]) -> list[ColumnSpec]:
         modality = _require_string(column.get("modality"), field=f"{field}.modality")
         if modality != SERVED_MODALITY:
             raise _refuse(
-                f"{field}.modality {modality!r} is not served; this service reads "
-                f"{SERVED_MODALITY!r} columns only",
+                f"{field}.modality must be {SERVED_MODALITY!r}, got {modality!r}",
                 field=f"{field}.modality",
             )
         role = (
@@ -83,21 +106,9 @@ def _parse_column_specs(raw_columns: Sequence[Any]) -> list[ColumnSpec]:
         )
         if role not in ROLES:
             raise _refuse(
-                f"{field}.role {role!r} is not served; expected one of {sorted(ROLES)}",
+                f"{field}.role must be one of {sorted(ROLES)}, got {role!r}",
                 field=f"{field}.role",
             )
-        for key, defaults in DEFAULT_ONLY_DESCRIPTOR_VALUES.items():
-            value = column.get(key)
-            # A type match keeps 0 from passing as False.
-            if value is not None and not any(
-                type(value) is type(default) and value == default
-                for default in defaults
-            ):
-                raise _refuse(
-                    f"{field}.{key} is not served; omit it"
-                    + (f" or pass {list(defaults)[0]!r}" if defaults else ""),
-                    field=f"{field}.{key}",
-                )
         try:
             column_specs.append(
                 ColumnSpec(

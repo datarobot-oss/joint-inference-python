@@ -144,7 +144,6 @@ def test_the_session_reports_what_the_mounted_checkpoint_serves() -> None:
     assert session.generation == JOINTFM_1_GENERATION
     assert session.precision == DEFAULT_INFERENCE_PRECISION == "bf16"
     assert session.decoding_strategy == DECODING_STRATEGY == "parallel_dense"
-    assert session.metadata_traits == ()
     assert session.time_index_support == TimeIndexSupport(
         encoding=DISCRETE_GRID_TIME_INDEX_ENCODING,
         supported_request_time_index_modes=_SERVED_TIME_INDEX_MODES,
@@ -382,7 +381,7 @@ def test_time_index_support_is_read_from_the_checkpoint() -> None:
             "missing 'time_index_support'",
         ),
         (
-            _with_time_index_block(_time_index_block(encoding="continuous")),
+            _with_time_index_block(_time_index_block(encoding="unknown")),
             ValueError,
             "unsupported time-index encoding",
         ),

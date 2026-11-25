@@ -294,6 +294,63 @@ def test_service_applies_one_sided_column_bounds_to_samples() -> None:
     assert samples[..., 0].min() < 0.0
 
 
+@pytest.mark.parametrize(
+    ("bound_field", "location", "direction"),
+    [("lower_bound", -100.0, "below"), ("upper_bound", 100.0, "above")],
+)
+def test_service_refuses_a_bound_the_forecast_puts_no_draws_inside(
+    bound_field: str, location: float, direction: str
+) -> None:
+    """A bound the redraws cannot meet is the request's to change, named by its field.
+
+    Reported as a server error, it would read as a fault of the service and be
+    retried, although every retry draws from the same forecast.
+    """
+    service = _service(
+        _FixedParameterJointFM(column_locations=(0.0, location), scale=0.1)
+    )
+    request = _request_payload()
+    request["return_mode"] = "samples"
+    request["n_samples"] = 8
+    request["columns"][1][bound_field] = 0.0
+
+    error = _refusal(service, request)
+
+    assert error.code == "VALIDATION_ERROR"
+    assert error.status == 400
+    assert error.field == f"columns[1].{bound_field}"
+    assert f"16 of 16 draws of that column still fall {direction} it" in error.message
+
+
+def test_a_seeded_sample_request_returns_the_same_draws_again() -> None:
+    """The seed fixes the draws, redrawn ones included; another seed moves them."""
+    service = _service(_FixedParameterJointFM(column_locations=(0.0, 0.0), scale=1.0))
+    request = _request_payload()
+    request["return_mode"] = "samples"
+    request["n_samples"] = 32
+    request["columns"][1]["lower_bound"] = 0.0
+
+    first = service.predict(request)["outputs"]["samples"]
+
+    assert service.predict(request)["outputs"]["samples"] == first
+    assert service.predict({**request, "seed": 8})["outputs"]["samples"] != first
+
+
+def test_requested_columns_select_from_the_same_draws() -> None:
+    """A request draws every declared column jointly, whichever columns it returns."""
+    service = _service(_FixedParameterJointFM(column_locations=(0.0, 0.0), scale=1.0))
+    request = _request_payload()
+    request["return_mode"] = "samples"
+    request["n_samples"] = 32
+    request["requested_columns"] = ["known_feature", "target"]
+    both = np.asarray(service.predict(request)["outputs"]["samples"])
+
+    request["requested_columns"] = ["target"]
+    target_alone = np.asarray(service.predict(request)["outputs"]["samples"])
+
+    np.testing.assert_array_equal(target_alone[..., 0], both[..., 1])
+
+
 def test_service_rejects_time_column_declared_in_columns() -> None:
     request = _request_payload()
     request["columns"].insert(0, {"name": "timestamp", "modality": "numeric"})
@@ -455,6 +512,31 @@ def test_service_rejects_times_beyond_the_checkpoint_time_capacity(
     assert exc_info.value.field == field
 
 
+def test_service_refuses_more_columns_than_max_series_before_the_forward() -> None:
+    """One column above ``max_series`` answers 400 with both counts, before the forward."""
+    max_series = int(TINY_CAPACITY_ENVELOPE["max_series"])
+    service, model = _service_and_model()
+    payload = _request_payload()
+    payload["columns"] = [
+        {"name": f"feature_{index}", "modality": "numeric"}
+        for index in range(max_series)
+    ] + [{"name": "target", "modality": "numeric", "role": "target"}]
+    payload["history_rows"] = [
+        {"timestamp": row["timestamp"], "target": row["target"]}
+        | {f"feature_{index}": float(index) + day for index in range(max_series)}
+        for day, row in enumerate(payload["history_rows"])
+    ]
+
+    refusal = _refusal(service, payload)
+
+    assert refusal.code == "INPUT_SIZE_EXCEEDED"
+    assert refusal.status == 400
+    assert refusal.field == "columns"
+    assert refusal.values == {"requested": max_series + 1, "allowed": max_series}
+    assert "max_series" in refusal.message
+    assert model.last_horizons is None
+
+
 def test_service_rejects_query_times_at_the_last_history_time() -> None:
     """A query at the last history time must not silently re-forecast that row."""
     request = _ordinal_payload([0, 1, 2, 3], [3])
@@ -496,12 +578,8 @@ def test_service_rejects_incomplete_or_non_finite_history(value: float | None) -
 @pytest.mark.parametrize(
     ("descriptor", "field"),
     [
-        pytest.param({"modality": "categorical"}, "columns[1].modality", id="modality"),
-        pytest.param({"role": "static"}, "columns[1].role", id="role"),
-        pytest.param({"nullable": True}, "columns[1].nullable", id="nullable"),
-        pytest.param(
-            {"traits": {"seasonal": "present"}}, "columns[1].traits", id="traits"
-        ),
+        pytest.param({"modality": "text"}, "columns[1].modality", id="modality"),
+        pytest.param({"role": "other"}, "columns[1].role", id="role"),
         pytest.param({"unit": "kg"}, "columns[1]", id="unknown-key"),
     ],
 )
@@ -518,40 +596,15 @@ def test_service_refuses_column_descriptors_it_does_not_serve(
     assert error.field == field
 
 
-def test_service_accepts_column_descriptors_at_their_defaults() -> None:
+def test_service_refuses_a_request_key_it_does_not_read() -> None:
+    """An unknown top-level key is refused rather than dropped."""
     request = _request_payload()
-    request["columns"][1].update(
-        {
-            "nullable": False,
-            "traits": {},
-            "time_value_use_local_normalized_time": False,
-            "time_value_calendar_id": "pandas-default",
-        }
-    )
-
-    assert _service().predict(request)["outputs"]["mean"] == [[200.0], [201.0]]
-
-
-@pytest.mark.parametrize(
-    ("key", "value"),
-    [("use_local_normalized_time", True), ("calendar_id", "business-days")],
-)
-def test_service_refuses_time_options_it_does_not_serve(key: str, value: Any) -> None:
-    request = _request_payload()
-    request[key] = value
+    request["locale"] = "de-DE"
 
     error = _refusal(_service(), request)
 
     assert error.code == "VALIDATION_ERROR"
-    assert error.field == key
-
-
-def test_service_accepts_time_options_at_their_defaults() -> None:
-    request = _request_payload()
-    request["use_local_normalized_time"] = False
-    request["calendar_id"] = "pandas-default"
-
-    assert _service().predict(request)["outputs"]["mean"] == [[200.0], [201.0]]
+    assert error.field == "locale"
 
 
 def test_service_reads_time_scale_and_timezone_for_absolute_datetime() -> None:
@@ -592,7 +645,6 @@ def test_health_payload_reports_the_served_jointfm_1_contract() -> None:
         "decoding_strategy": "parallel_dense",
         "supported_query_modes": ["forecast", "condition"],
         "supported_condition_kinds": ["equality", "interval"],
-        "supported_metadata_traits": [],
         "supported_return_modes": ["log_prob", "mean", "quantiles", "samples"],
         "supported_time_index_modes": [
             "absolute_datetime",

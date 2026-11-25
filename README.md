@@ -8,6 +8,8 @@
 <p align="center">
   <a href="https://www.datarobot.com/">Homepage</a>
   ·
+  <a href="https://pypi.org/project/jointfm-inference/">PyPI</a>
+  ·
   <a href="https://github.com/datarobot-oss/joint-client-python">Python client</a>
   ·
   <a href="https://docs.datarobot.com/en/docs/get-started/troubleshooting/general-help.html">Support</a>
@@ -17,42 +19,93 @@
   <a href="https://github.com/datarobot-oss/joint-inference-python/actions/workflows/ci.yml">
     <img src="https://github.com/datarobot-oss/joint-inference-python/actions/workflows/ci.yml/badge.svg" alt="CI">
   </a>
+  <a href="https://pypi.org/project/jointfm-inference/">
+    <img src="https://img.shields.io/pypi/v/jointfm-inference" alt="PyPI version">
+  </a>
+  <a href="https://pypi.org/project/jointfm-inference/">
+    <img src="https://img.shields.io/pypi/pyversions/jointfm-inference" alt="Python versions">
+  </a>
   <a href="https://github.com/datarobot-oss/joint-inference-python/blob/main/LICENSE">
     <img src="https://img.shields.io/github/license/datarobot-oss/joint-inference-python" alt="License">
   </a>
 </p>
 
-`jointfm-inference` is the inference runner for JointFM: it loads JointFM checkpoints and serves joint probabilistic forecasts over HTTP. Applications talk to a running instance through the [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python) SDK ([PyPI](https://pypi.org/project/jointfm-client/)).
+`jointfm-inference` is the inference runner for JointFM: it loads JointFM checkpoints and serves joint probabilistic forecasts over HTTP. Applications talk to a running instance through the [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python) SDK ([PyPI](https://pypi.org/project/jointfm-client/)). The service runs on its own, started by `jointfm-inference serve` or the container image, or your application starts and stops it from Python, with this package installed beside the client ([Start from Python](#start-from-python)); then there is no separate service to run.
 
 The repository holds the serving code for JointFM 1 checkpoints, the `jointfm-inference` command, and a container image. Neither the package nor the image contains weights: every service names the checkpoint it serves in its own configuration.
 
-> **Status: pre-alpha.** The HTTP contract and the checkpoint format may change between releases.
+> **Status: beta.** Every released JointFM 1 checkpoint keeps loading and predicting as it did, and every documented request keeps working; a checkpoint layout is dropped only after a notice of at least 90 days ([Compatibility of released exports](https://github.com/datarobot-oss/joint-inference-python/blob/main/CONTRIBUTING.md#compatibility-of-released-exports)). Anything else can still change in a minor release while the version is `0.x`.
 
 ## Quickstart
 
-1. **Install the prerequisites:** [uv](https://docs.astral.sh/uv/) and [Task](https://taskfile.dev/). Ubuntu, Amazon Linux, and macOS are supported. Docker is needed only for the [container](#container). [Hardware](#hardware) lists the GPU, memory, and disk space the service needs.
+1. **Check the requirements:** Python 3.13 or newer on Ubuntu, Amazon Linux, or macOS. [Hardware](#hardware) lists the GPU, memory, and disk space the service needs.
 2. **Get a weights file.** Serving needs a JointFM serving weights file: a JointFM 1 checkpoint in the format the runner reads. How to obtain one will be documented here.
-3. **Clone the repository:**
+3. **Install the package** into a fresh environment:
 
    ```sh
-   git clone https://github.com/datarobot-oss/joint-inference-python.git
-   cd joint-inference-python
+   python3.13 -m venv .venv
+   . .venv/bin/activate
+   pip install jointfm-inference
    ```
 
-4. **Configure the service.** Copy [.env.template](.env.template) to `.env` and set `JOINTFM_INFERENCE_CHECKPOINT_PATH` to the weights file, or to where it should be downloaded together with `JOINTFM_INFERENCE_CHECKPOINT_URL` and `JOINTFM_INFERENCE_CHECKPOINT_SHA256`. With the [DataRobot CLI](https://github.com/datarobot-oss/cli), `task start` writes `.env` instead (see [Configuration](#configuration)).
-5. **Serve it:**
+4. **Serve the weights file** from a shell, or let your application start the service instead, as [Start from Python](#start-from-python) shows. [Configuration](#configuration) lists every other setting, such as the GPU to run on:
 
    ```sh
-   task serve   # creates the environment on first use; stop with Ctrl-C
+   JOINTFM_INFERENCE_CHECKPOINT_PATH=/path/to/weights.pt jointfm-inference serve   # stop with Ctrl-C
    ```
 
-6. **Check it** from a second shell; this requests every return mode the service advertises:
+5. **Check it** from a second shell in the same environment; this requests every return mode the service advertises:
 
    ```sh
-   task probe
+   jointfm-inference probe --service-url http://127.0.0.1:8080
    ```
 
-7. **Forecast** from Python with [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python), pointing its local selector `JOINTFM_LOCAL_BASE_URL` at `http://127.0.0.1:8080`.
+6. **Forecast** from Python with [`jointfm-client`](https://github.com/datarobot-oss/joint-client-python), pointing its local selector `JOINTFM_LOCAL_BASE_URL` at `http://127.0.0.1:8080`.
+
+### From a clone
+
+The `task` targets serve from a clone of this repository instead and read the settings from a `.env` file; they also build and run the [container](#container). They need [uv](https://docs.astral.sh/uv/) and [Task](https://taskfile.dev/), and the container needs Docker:
+
+```sh
+git clone https://github.com/datarobot-oss/joint-inference-python.git
+cd joint-inference-python
+cp .env.template .env   # then set the weights file in .env
+task serve              # creates the environment on first use; stop with Ctrl-C
+task probe              # from a second shell
+```
+
+In `.env`, set `JOINTFM_INFERENCE_CHECKPOINT_PATH` to the weights file, or to where it should be downloaded together with `JOINTFM_INFERENCE_CHECKPOINT_URL` and `JOINTFM_INFERENCE_CHECKPOINT_SHA256`.
+
+## Start from Python
+
+An application can serve the weights itself, with this package and the client installed in its own environment, instead of running a separate service. `LocalService` starts the service as a child process of the application's interpreter when its `with` block begins, returns once the service answers its health check, and stops it when the block ends, also when the block raises:
+
+```sh
+pip install jointfm-inference jointfm-client
+```
+
+```python
+from jointfm_client import JointFMClient
+from jointfm_inference import LocalService, ServiceSettings
+
+settings = ServiceSettings(checkpoint_path="/path/to/weights.pt", device="cuda:0")
+with LocalService(settings) as service:
+    client = JointFMClient.from_env(
+        env={
+            "JOINTFM_LOCAL_BASE_URL": service.base_url,
+            "JOINTFM_SCHEMA_VERSION": "v6",
+        },
+        dotenv_path=None,
+        config_path=None,
+    )
+    print(client.health())  # forecast as the client's README shows
+```
+
+- **Settings.** `ServiceSettings` has one field per variable in [Configuration](#configuration), named after it in lower case (`device` for `JOINTFM_INFERENCE_DEVICE`); a field left unset keeps that variable's default. Only these settings configure the service: the application's own `JOINTFM_INFERENCE_*` variables do not reach it. The service checks every value when it starts.
+- **Address.** `jointfm-inference serve` listens on every network interface by default, but `LocalService` listens on the loopback address unless `bind_host` says otherwise, and on a free port unless `port` names one; `service.base_url` is where it answers. The service has no authentication, so binding it to another interface opens it to that network.
+- **Failures.** Starting raises `LocalServiceError` when the service exits before it answers or does not answer within `ready_timeout_seconds`, by default long enough to download the weights first; the message ends with the service's last lines of output, which say why. That output goes to a temporary file removed when the block ends, or is appended to `log_path`.
+- **Stopping.** Leaving the block sends the service SIGTERM and kills it if it is still running after `stop_timeout_seconds`. An application killed without unwinding, as by SIGKILL, leaves the service running.
+- **Environment.** This package needs Python 3.13 or newer, the client 3.11 or newer, so the application needs 3.13. Importing `jointfm_inference` loads neither torch nor the model into the application; only the service process does.
 
 ## Hardware
 
@@ -70,13 +123,11 @@ With `JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS` above 1, each concurrent reques
 
 **RAM.** About 4 GB when the model runs on a GPU, plus about 20 bytes for every value a response returns (samples × forecast steps × series), so about 8 GB for 20,000 samples of the largest request. On the CPU, the model itself runs in RAM: plan for about 16 GB at 1,000 samples and about 32 GB at 20,000.
 
-**Disk.** About 0.7 GB for the weights; a download is written next to the file before it replaces it, so replacing a file briefly needs twice that. About 6 GB for the Python environment `task serve` creates on Linux, most of it PyTorch with its CUDA libraries, and about as much again for the [container](#container) image.
+**Disk.** About 0.7 GB for the weights; a download is written next to the file before it replaces it, so replacing a file briefly needs twice that. About 6 GB for the Python environment on Linux, most of it PyTorch with its CUDA libraries, and about as much again for the [container](#container) image.
 
 ## Configuration
 
-`jointfm-inference serve` takes no options: it reads every setting from `JOINTFM_INFERENCE_*` environment variables, and the `Taskfile` targets load them from `.env`, a git-ignored file that [.env.template](.env.template) documents. The checkpoint is either already at `JOINTFM_INFERENCE_CHECKPOINT_PATH` or downloaded there at startup from `JOINTFM_INFERENCE_CHECKPOINT_URL`. A download needs the file's SHA-256 digest: it streams into a temporary file, is verified, and only then moves into place, and a file already at the path is reused only when its digest matches, so changing the URL never serves the old weights. The service stops cleanly on SIGINT or SIGTERM.
-
-With the [DataRobot CLI](https://github.com/datarobot-oss/cli), `task start` (or `dr start`) writes `.env` instead of the copy: `dr` logs in to DataRobot, fills in `DATAROBOT_ENDPOINT` and `DATAROBOT_API_TOKEN`, and asks for the checkpoint and the deploy settings that [.datarobot/cli/jointfm.yaml](.datarobot/cli/jointfm.yaml) defines. The optional settings stay documented in `.env.template`; add any of them to `.env` by hand, and `dr` keeps them on later runs.
+`jointfm-inference serve` takes no options: it reads every setting from `JOINTFM_INFERENCE_*` environment variables, and the `Taskfile` targets load them from `.env`, a git-ignored file that [.env.template](https://github.com/datarobot-oss/joint-inference-python/blob/main/.env.template) documents. The checkpoint is either already at `JOINTFM_INFERENCE_CHECKPOINT_PATH` or downloaded there at startup from `JOINTFM_INFERENCE_CHECKPOINT_URL`. A download needs the file's SHA-256 digest: it streams into a temporary file, is verified, and only then moves into place, and a file already at the path is reused only when its digest matches, so changing the URL never serves the old weights. The service stops cleanly on SIGINT or SIGTERM.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -103,11 +154,11 @@ A connection that sends or accepts no byte for 60 seconds is closed, a stalled r
 
 ## HTTP API
 
-The service answers `GET /healthz` and `POST /predict`. [openapi.json](src/jointfm_inference/model/service/wire_schema/openapi.json) is their [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document: every request, response, health, and error field with its type and meaning, and one example request per query mode and return mode. The service's own code generates it, so it cannot drift from what the service accepts and sends: `jointfm-inference schema` writes it, a commit hook rewrites a stale copy and stops the commit until the rewritten one is staged, and the package ships it as data, so every release tag carries the document of the contract that release serves. Its `info.version` is the `schema_version` every prediction request sends.
+The service answers `GET /healthz` and `POST /predict`. [openapi.json](https://github.com/datarobot-oss/joint-inference-python/blob/main/src/jointfm_inference/model/service/wire_schema/openapi.json) is their [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document: every request, response, health, and error field with its type and meaning, and one example request per query mode and return mode. The service's own code generates it, so it cannot drift from what the service accepts and sends: `jointfm-inference schema` writes it, a commit hook rewrites a stale copy and stops the commit until the rewritten one is staged, and the package ships it as data, so every release tag carries the document of the contract that release serves. Its `info.version` is the `schema_version` every prediction request sends.
 
 ## Container
 
-`task docker:build` builds `jointfm-inference:<project version>` from [container/Dockerfile](container/Dockerfile). The image holds the package and its dependencies, never weights: its command is `jointfm-inference serve`, it listens on port 8080, and it expects the checkpoint at `/models/jointfm.pt` unless `JOINTFM_INFERENCE_CHECKPOINT_PATH` says otherwise. `/models` is a volume, so mount a directory there that holds the checkpoint, or one the container may download it into:
+`task docker:build` builds `jointfm-inference:<project version>` from [container/Dockerfile](https://github.com/datarobot-oss/joint-inference-python/blob/main/container/Dockerfile). The image holds the package and its dependencies, never weights: its command is `jointfm-inference serve`, it listens on port 8080, and it expects the checkpoint at `/models/jointfm.pt` unless `JOINTFM_INFERENCE_CHECKPOINT_PATH` says otherwise. `/models` is a volume, so mount a directory there that holds the checkpoint, or one the container may download it into:
 
 ```sh
 docker run --rm -p 8080:8080 -v "$PWD/models:/models" jointfm-inference:<version>
@@ -115,27 +166,14 @@ docker run --rm -p 8080:8080 -v "$PWD/models:/models" jointfm-inference:<version
 
 `task docker:run` does this from `.env`: it passes every `JOINTFM_INFERENCE_*` setting on to the container, mounts the directory of `JOINTFM_INFERENCE_CHECKPOINT_PATH` at `/models`, runs as the calling user so a downloaded file belongs to them, and publishes the container's port 8080 at `.env`'s bind host and port. Options after `--` reach `docker run`, such as `task docker:run -- --gpus all` together with `JOINTFM_INFERENCE_DEVICE=cuda`.
 
-## Deploying to DataRobot
-
-The same `.env` that `task serve` reads also deploys the service to DataRobot as a Workload, a container DataRobot runs and scales. Fill in the deploy section of [.env.template](.env.template) (a DataRobot API endpoint and token, a Pulumi passphrase, and optionally a resource bundle), install the [Pulumi CLI](https://www.pulumi.com/docs/install/), and run:
-
-```sh
-task deploy:bundles   # list the resource bundles the cluster offers
-task deploy:preview   # show what would be created or changed
-task deploy           # build the image in DataRobot and start the Workload
-task deploy:probe     # check /healthz and every return mode through DataRobot
-task deploy:destroy   # delete the Workload and its image
-```
-
-The [Pulumi program](deploy/stack.py) needs neither docker nor an image registry: it stages a build context under `deploy/build/` and DataRobot builds the image from it. That context is the [container](container/Dockerfile) build plus one [extra stage](deploy/bundled.Dockerfile) that copies the checkpoint at `JOINTFM_INFERENCE_CHECKPOINT_PATH` into the image, so the checkpoint must be a file on the deploying machine; the download settings are not used. The optional service settings of `.env` pass through to the container.
-
-`JOINTFM_DEPLOY_BUNDLE` picks the node each replica runs on, from the cluster's catalog of resource bundles (default `cpu.5xlarge`, 2 CPU and 8 GiB); `task deploy:bundles` lists them. A bundle with a GPU runs the model on CUDA: the deploy sets `JOINTFM_INFERENCE_DEVICE=cuda`, and refuses a device in `.env` that disagrees with the bundle. `JOINTFM_DEPLOY_CPU`, `JOINTFM_DEPLOY_MEMORY`, and `JOINTFM_DEPLOY_GPU` optionally narrow the container's share of the bundle, and the deploy refuses an override the bundle cannot hold, before it stages or uploads anything. `JOINTFM_DEPLOY_REPLICAS` sets the replica count. Both routes require a DataRobot API token as a bearer token: `{"Authorization": "Bearer <token>"}` on requests to `<endpoint>/healthz` and `<endpoint>/predict`, where `task deploy:outputs` prints the endpoint.
-
-Pulumi records what it created in a state backend, by default the local `~/.pulumi`; set `PULUMI_BACKEND_URL` to share state between machines. `JOINTFM_DEPLOY_STACK` names the stack, and each stack is one Workload.
-
 ## Releases
 
-A release is a tagged version of this repository, not an upload. Cutting one adds a commit `bump: version <old> → <new>` to `main` that sets `version` in [pyproject.toml](pyproject.toml) and `uv.lock` and adds the new version's entries to `CHANGELOG.md`, and tags that commit `v<new>`. Nothing is published anywhere else: the package carries the `Private :: Do Not Upload` classifier, which PyPI refuses, no container image is pushed, and no workflow runs on a tag. Install a release from its tag, for example `uv add "jointfm-inference @ git+https://github.com/datarobot-oss/joint-inference-python@v<version>"`.
+A release is a tagged version of this repository, uploaded to [PyPI](https://pypi.org/project/jointfm-inference/). Cutting one adds a commit `bump: version <old> → <new>` to `main` that sets `version` in [pyproject.toml](https://github.com/datarobot-oss/joint-inference-python/blob/main/pyproject.toml) and `uv.lock` and adds the new version's entries to `CHANGELOG.md`, and tags that commit `v<new>`. Pushing the tag runs the [Publish to PyPI](https://github.com/datarobot-oss/joint-inference-python/blob/main/.github/workflows/publish.yml) workflow. It uploads the release only after `task build` has built the distribution, installed its wheel into a fresh environment without `uv.lock`, as `pip` would for a user, served a test checkpoint from it, and probed every return mode, and only when the tag names the version it built. The tag, the wheel, and the PyPI version therefore always agree, and a wheel that lacks a module or a dependency never reaches PyPI. No container image is pushed. Install a release with `pip install jointfm-inference==<version>`.
+
+The workflow authenticates through PyPI's [trusted publishing](https://docs.pypi.org/trusted-publishers/), so the repository stores no PyPI token. It needs two settings outside the repository, made once by an owner of the PyPI project and an administrator of the repository:
+
+- a trusted publisher of the PyPI project `jointfm-inference` for owner `datarobot-oss`, repository `joint-inference-python`, workflow `publish.yml`, and environment `pypi`; before the first upload, a [pending publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/) creates the project;
+- a GitHub Actions environment named `pypi` on the repository, which may require a reviewer to approve each upload.
 
 ### Version numbers
 
@@ -164,18 +202,19 @@ task release:publish  # push main and the new tag to origin
 
 Nothing has left the machine at this point. Inspect the commit with `git show`; to cut a different version, drop the tag and the commit (`git tag -d v<new>`, then `git reset --hard origin/main`) and run `task release` again.
 
-`task release:publish` checks again that the tree is clean on `main`, that the tag of the version in `pyproject.toml` points at `HEAD`, and that `origin` does not have that tag yet, since a published tag never moves. It lists the commits it will push, asks for confirmation when run from a terminal, and pushes `main` first, then that one tag. The push to `main` starts the workflows every push to `main` runs; the tag starts none.
+`task release:publish` checks again that the tree is clean on `main`, that the tag of the version in `pyproject.toml` points at `HEAD`, and that `origin` does not have that tag yet, since a published tag never moves. It lists the commits it will push, asks for confirmation when run from a terminal, and pushes `main` first, then that one tag. The push to `main` starts the workflows every push to `main` runs; the tag starts Publish to PyPI.
 
 - The release commit goes to `main` directly, while the repository's rules require pull-request review and passing status checks for `main`. GitHub accepts the push only from an account that may bypass those rules.
 - When a pull request merged into `main` after `task release`, the push of `main` is rejected as not a fast-forward and nothing is pushed. Drop the tag and the commit as above and cut the release again; rebasing would move the release commit away from its tag, which `task release:publish` refuses.
 - When `main` was pushed but the tag push failed, run `task release:publish` again: the checks still pass and only the tag is left to push.
+- When Publish to PyPI fails, the tag is published but the version is not on PyPI. Rerun the workflow once a failing setting outside the repository is fixed; when the distribution itself must change, cut a new release, because a published tag never moves.
 
 Commitizen bumps from the tag that matches the version in `pyproject.toml`. Before the first release that tag does not exist yet, so every release task stops and prints the `git tag` command that seeds it on the commit that set the version.
 
 ## Contributing
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup, every `task` target, the package layout, the checkpoint format, and the checks that keep this public repository free of private material. Rules for contributors and coding agents are in [AGENTS.md](AGENTS.md).
+[CONTRIBUTING.md](https://github.com/datarobot-oss/joint-inference-python/blob/main/CONTRIBUTING.md) covers the development setup, every `task` target, the package layout, the checkpoint format, and the checks that keep this public repository free of private material. Rules for contributors and coding agents are in [AGENTS.md](https://github.com/datarobot-oss/joint-inference-python/blob/main/AGENTS.md).
 
 ## License
 
-Licensed under the [Apache License, Version 2.0](LICENSE).
+Licensed under the [Apache License, Version 2.0](https://github.com/datarobot-oss/joint-inference-python/blob/main/LICENSE).

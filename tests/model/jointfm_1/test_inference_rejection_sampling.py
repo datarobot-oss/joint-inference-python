@@ -17,6 +17,7 @@
 import pytest
 import torch
 
+from jointfm_inference.model.inference import UnmetSampleBoundError
 from tests.support.inference import create_student_t_adapter
 
 
@@ -80,6 +81,30 @@ def test_an_unreachable_bound_fails_after_the_retries(
     torch.manual_seed(7)
     with pytest.raises(RuntimeError, match=match):
         _adapter(mean=mean, scale=0.1).sample(n_samples=10, max_retries=5, **bound)
+
+
+def test_an_unmet_bound_names_its_column_and_argument() -> None:
+    """The failure says which bound the draws still miss, and how many miss it."""
+    adapter = create_student_t_adapter(
+        {
+            "logits": torch.zeros(1, 1, 1),
+            "means": torch.tensor([0.0, -100.0]).reshape(1, 1, 1, 2),
+            "chol": (0.1 * torch.eye(2)).reshape(1, 1, 1, 2, 2),
+            "df": torch.full((1, 1, 1), 30.0),
+        }
+    )
+
+    with pytest.raises(UnmetSampleBoundError) as raised:
+        adapter.sample(
+            n_samples=10,
+            rng=torch.Generator().manual_seed(7),
+            min_value=torch.tensor([-1e9, 0.0]),
+            max_retries=5,
+        )
+
+    error = raised.value
+    assert (error.argument, error.column, error.bound) == ("min_value", 1, 0.0)
+    assert (error.failing, error.total, error.redraws) == (10, 10, 5)
 
 
 def test_a_lower_bound_above_the_upper_bound_is_refused() -> None:
