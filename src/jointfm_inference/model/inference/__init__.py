@@ -29,6 +29,7 @@
   payload reports.
 """
 
+from ._bounds import UnmetSampleBoundError
 from .adapter import PredictorAdapter
 from .backend_registry import (
     INFERENCE_BACKEND_ENTRY_POINT_GROUP,
@@ -82,6 +83,7 @@ __all__ = [
     "PredictorAdapter",
     "ServingBackend",
     "TimeIndexSupport",
+    "UnmetSampleBoundError",
     "UnregisteredGenerationError",
     "condition_at_position",
     "condition_student_t_mixture",

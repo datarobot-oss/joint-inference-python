@@ -184,9 +184,7 @@ class ConditionalDistributionResult(InferenceDistributionResult, Protocol):
 
     Conditioning is a strictly narrower capability than the four return-mode
     operations: it needs the head's emitted mixture parameters, not just draws
-    from them. A backend whose result does not satisfy this protocol serves no
-    ``condition`` query, and the service refuses the mode before execution
-    rather than discovering the gap afterwards.
+    from them.
     """
 
     def condition(
@@ -261,21 +259,8 @@ class InferenceBackend(Protocol):
         ...
 
     @property
-    def metadata_traits(self) -> tuple[str, ...]:
-        """The metadata traits the mounted model reads as expert hints; may be empty."""
-        ...
-
-    @property
     def supported_return_modes(self) -> frozenset[str]:
         """The return modes the mounted head serves; a subset of :data:`INFERENCE_RETURN_MODES`."""
-        ...
-
-    @property
-    def supports_conditioning(self) -> bool:
-        """Whether every result of :meth:`execute` answers conditioning requests.
-
-        ``True`` promises a :class:`ConditionalDistributionResult`.
-        """
         ...
 
     def execute(

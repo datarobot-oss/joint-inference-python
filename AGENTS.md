@@ -1,5 +1,7 @@
 # Agent Contract
 
+**Golden rule: point to files with plain paths.** Every file a response to the user refers to is written as a plain path with a line number, wrapped in backticks (`src/package/module.py:42`): only this form opens the file at that line on Ctrl+click (Cmd+click on macOS) in the editor's terminal, and the backticks keep a name such as `__init__.py` intact, whose double underscores Markdown otherwise swallows. Every path is wrapped this way, and a response uses inline backticks for nothing else. Linked text that does not show the plain path is not allowed: no Markdown link, no HTML anchor, no terminal hyperlink, nor any other link whose visible text hides the path. For a file in this project, prefer the path relative to the repository root, which may stand inline in a sentence. An absolute path, as a file outside this project needs, always stands alone on its own line.
+
 Rules for coding agents and human contributors working in this repository. `CLAUDE.md` is a symbolic link to this file.
 
 ## Public by design

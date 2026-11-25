@@ -123,11 +123,9 @@ class TestContractConformance:
         assert backend.generation == JOINTFM_1_GENERATION
         assert backend.head_name == "studentt"
         assert backend.supported_return_modes == INFERENCE_RETURN_MODES
-        assert backend.supports_conditioning is True
-        assert backend.metadata_traits == ()
 
     def test_execute_returns_a_result_that_conditions(self) -> None:
-        """``supports_conditioning`` promises a conditional result on every request."""
+        """Every result answers a conditioning request, as ``/healthz`` advertises."""
         result = _mounted_backend().execute(
             CanonicalInferenceRequest(sample=_canonical_sample())
         )

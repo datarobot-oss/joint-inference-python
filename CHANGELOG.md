@@ -1,3 +1,27 @@
+## v0.10.2 (2026-11-25)
+
+### Fix
+
+- Refuse a request with more columns than the checkpoint's max_series with a 400 INPUT_SIZE_EXCEEDED on columns that carries the requested and allowed counts, before any descriptor is parsed, instead of an INTERNAL_ERROR from the network's column check that clients retried, describe min_series as the fewest columns a training sample carried, which limits no request, and state the column refusal in the wire schema's error, error value, and columns descriptions
+
+## v0.10.1 (2026-11-21)
+
+### Fix
+
+- Refuse a sample bound that redraws cannot meet with a 400 VALIDATION_ERROR on its column's lower_bound or upper_bound instead of an INTERNAL_ERROR, raise UnmetSampleBoundError from PredictorAdapter.sample naming that bound, and document in the wire schema how bounds redraw, what a seed reproduces, and what parallel_dense decoding means
+
+## v0.10.0 (2026-11-20)
+
+### Feat
+
+- Start an inference service from Python with LocalService and ServiceSettings, and require torch>=2.15.0 instead of exactly 2.15.0
+
+## v0.9.0 (2026-11-20)
+
+### Feat
+
+- Serve locally and from the container image
+
 ## v0.8.0 (2026-11-18)
 
 ### Feat

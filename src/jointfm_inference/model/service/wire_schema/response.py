@@ -83,8 +83,11 @@ def _all_required(*entries: WireField) -> tuple[WireField, ...]:
 
 _CAPACITY_ENVELOPE_VALUES = described_values(
     {
-        "min_series": "The fewest columns the model was built for.",
-        "max_series": "The most columns the model was built for.",
+        "min_series": "The fewest columns a training sample of the model "
+        "carried. It describes the training data and limits no request: one "
+        "column is enough.",
+        "max_series": "The most columns the model was built for, and the most "
+        "one request may declare.",
         "t_input": "The time span of the longest history the model was built for.",
         "t_output": "The time span of the furthest horizon the model was built for.",
         "n_input": "The longest history the model was built for, in steps.",
@@ -166,7 +169,11 @@ HEALTH_FIELDS: Final = _all_required(
     WireField(
         "decoding_strategy",
         _STRING,
-        "How the served model decodes forecast horizons.",
+        "How the served model decodes future positions. A JointFM 1 model "
+        "reports `parallel_dense`: one forward emits the joint "
+        "distribution of every position, and each position is drawn on its "
+        "own, so a draw is joint across the columns of a position and "
+        "independent across positions.",
     ),
     WireField(
         "supported_query_modes",
@@ -176,14 +183,7 @@ HEALTH_FIELDS: Final = _all_required(
     WireField(
         "supported_condition_kinds",
         _array_of(enum_schema(CONDITION_KIND_VALUES)),
-        "The condition kinds a `condition` query may use; empty where the "
-        "service answers no `condition` query.",
-    ),
-    WireField(
-        "supported_metadata_traits",
-        _array_of(_STRING),
-        "The traits a column descriptor's `traits` may carry; empty where the "
-        "model reads none.",
+        "The condition kinds a `condition` query may use.",
     ),
     WireField(
         "supported_return_modes",

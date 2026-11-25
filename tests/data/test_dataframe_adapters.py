@@ -65,7 +65,7 @@ class TestColumnSpec:
 
     def test_rejects_an_unknown_role(self) -> None:
         with pytest.raises(ValueError, match="role must be one of"):
-            ColumnSpec(name="a", role="static")  # ty: ignore[invalid-argument-type]
+            ColumnSpec(name="a", role="other")  # ty: ignore[invalid-argument-type]
 
     def test_rejects_a_nan_bound(self) -> None:
         with pytest.raises(ValueError, match="lower_bound must not be NaN"):

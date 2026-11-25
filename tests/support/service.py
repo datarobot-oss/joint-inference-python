@@ -27,8 +27,7 @@ from jointfm_inference.model.service import (
     InferenceServiceConfig,
     JointFMHTTPService,
 )
-
-from jointfm_inference.model.service.config import ENV_PREFIX
+from jointfm_inference.service_settings import ENV_PREFIX
 
 from tests.support.models import checkpoint_mapping
 
