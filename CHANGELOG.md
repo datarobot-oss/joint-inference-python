@@ -1,3 +1,9 @@
+## v0.10.2 (2026-11-25)
+
+### Fix
+
+- Refuse a request with more columns than the checkpoint's max_series with a 400 INPUT_SIZE_EXCEEDED on columns that carries the requested and allowed counts, before any descriptor is parsed, instead of an INTERNAL_ERROR from the network's column check that clients retried, describe min_series as the fewest columns a training sample carried, which limits no request, and state the column refusal in the wire schema's error, error value, and columns descriptions
+
 ## v0.10.1 (2026-11-21)
 
 ### Fix
