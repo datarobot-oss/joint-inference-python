@@ -1,3 +1,9 @@
+## v0.11.0 (2026-11-26)
+
+### Feat
+
+- Answer a server failure with a generic 500 INTERNAL_ERROR whose message names only a reference, and log its traceback under that reference instead of returning the exception's text, which can name files, devices, or memory state, catch failures of GET /healthz at the same boundary, send the service's log records from INFO up to stderr and, with the new JOINTFM_INFERENCE_LOG_DIR, to a jointfm-inference.log file that rolls over at 32 MiB and keeps 3 files, configure the log before the checkpoint loads so download and load records reach it, and mount that directory at /logs in task docker:run
+
 ## v0.10.2 (2026-11-25)
 
 ### Fix
