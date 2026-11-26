@@ -39,6 +39,10 @@ Dependencies point one way: this project depends only on public packages and nev
 
 Never run a state-changing git command — staging, committing, branching, stashing, resetting, cleaning, pushing, or rewriting history — unless the user explicitly asks for that specific command. Read-only inspection (`git status`, `git diff`, `git log`, `git show`) is always allowed. If a task seems to need a state-changing operation, stop and ask the user to run it.
 
+## Publishing
+
+Never publish an artifact: only the user publishes. Publishing makes a build product available beyond this machine: uploading a package, model weights, or container image to PyPI or another registry (here `task release:publish`, which pushes the release tag that the PyPI workflow publishes), creating a GitHub release, or pushing a tag or rerunning a workflow that does any of these. An agent never runs such a command, not even when the user asks for it or approves a plan or an option that includes it, because a published version can never be reused and rarely be taken back; it stops and gives the user the exact command to run (`! <command>` in Claude Code). Preparing a release locally (building, bumping the version, tagging) is not publishing, though the git rule still governs it.
+
 ## Finishing a change
 
 Run `task pre-commit` and fix every reported issue. A change that touches only documentation or configuration files — no Python code and no notebooks — needs no final `task pre-commit` run; run `task check` and `task leak-guard` instead, since such files are where private material most often slips in. Then say why each change is necessary, one line per changed file or concern (a table when there are several) — the user sees the diff, so do not paste it or walk through it — and end with a suggested commit message in Conventional Commits style (`feat: Message`, `fix: Message`, `docs: Message`).
