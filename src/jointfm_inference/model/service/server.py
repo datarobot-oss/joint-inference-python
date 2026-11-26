@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Process entrypoints for the packaged inference HTTP server.
+"""Process entrypoints and process log of the packaged inference HTTP server.
 
 ``ThreadingHTTPServer`` is imported at module scope so tests can patch the
 symbol at ``jointfm_inference.model.service.server.ThreadingHTTPServer`` for transport-
@@ -21,9 +21,12 @@ level integration without binding a real socket.
 
 from __future__ import annotations
 
+import logging
 import signal
 import sys
 from http.server import ThreadingHTTPServer
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from types import FrameType
 
 from jointfm_inference.model.inference import JointFMInferenceSession
@@ -34,15 +37,57 @@ from .http_handler import _handler_class
 from .http_service import JointFMHTTPService
 
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+SERVICE_LOG_LEVEL = logging.INFO
+LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+LOG_FILE_NAME = "jointfm-inference.log"
+# Bounds the disk the log takes: a file rolls over at this size, and the
+# service keeps LOG_FILE_COUNT files, the one it writes included.
+LOG_FILE_MAX_BYTES = 32 * 1024 * 1024
+LOG_FILE_COUNT = 3
+
+logger = logging.getLogger(__name__)
 
 
-def create_service_from_env() -> JointFMHTTPService:
-    """Load the configured checkpoint and return the ready HTTP service.
+def configure_logging(log_dir: str | None) -> None:
+    """Send the process's log records to stderr and, with ``log_dir``, a rolling file.
 
-    The checkpoint is downloaded first when the environment names a download
+    Records from ``INFO`` up reach the root logger's handlers, tracebacks
+    included, so a server failure leaves its traceback under the reference
+    its response names. With ``log_dir`` (``JOINTFM_INFERENCE_LOG_DIR``), the
+    directory is created if missing and records also go to
+    ``<log_dir>/jointfm-inference.log``, which rolls over at
+    ``LOG_FILE_MAX_BYTES``, keeping ``LOG_FILE_COUNT`` files. Only the
+    process entry point calls it, because it configures the whole process.
+
+    Raises:
+        OSError: ``log_dir`` cannot be created or its log file not opened.
+    """
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
+    if log_dir is not None:
+        directory = Path(log_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        handlers.append(
+            RotatingFileHandler(
+                directory / LOG_FILE_NAME,
+                maxBytes=LOG_FILE_MAX_BYTES,
+                backupCount=LOG_FILE_COUNT - 1,
+                encoding="utf-8",
+            )
+        )
+    root = logging.getLogger()
+    formatter = logging.Formatter(LOG_FORMAT)
+    for handler in handlers:
+        handler.setFormatter(formatter)
+        root.addHandler(handler)
+    root.setLevel(SERVICE_LOG_LEVEL)
+
+
+def create_service(config: InferenceServiceConfig) -> JointFMHTTPService:
+    """Load the checkpoint ``config`` names and return the ready HTTP service.
+
+    The checkpoint is downloaded first when ``config`` names a download
     source and the file is not yet at the configured path.
     """
-    config = InferenceServiceConfig.from_env()
     checkpoint_path = resolve_checkpoint(config)
 
     session = JointFMInferenceSession.from_checkpoint(
@@ -54,10 +99,15 @@ def create_service_from_env() -> JointFMHTTPService:
     return JointFMHTTPService(config=config, session=session)
 
 
+def create_service_from_env() -> JointFMHTTPService:
+    """Return the ready HTTP service of the checkpoint the environment configures."""
+    return create_service(InferenceServiceConfig.from_env())
+
+
 def _stop_serving(signum: int, frame: FrameType | None) -> None:
     """Leave ``serve_forever`` with a clean exit when the process is told to stop."""
     del frame
-    print(f"Stopping on {signal.Signals(signum).name}", file=sys.stderr)
+    logger.info("Stopping on %s", signal.Signals(signum).name)
     raise SystemExit(0)
 
 
@@ -77,7 +127,7 @@ def serve(service: JointFMHTTPService) -> None:
         stop_signal: signal.signal(stop_signal, _stop_serving)
         for stop_signal in STOP_SIGNALS
     }
-    print(f"Serving on http://{address[0]}:{address[1]}", file=sys.stderr)
+    logger.info("Serving on http://%s:%d", *address)
     try:
         server.serve_forever()
     finally:
@@ -87,6 +137,11 @@ def serve(service: JointFMHTTPService) -> None:
 
 
 def main() -> None:
-    """Launch the packaged inference HTTP service from process entrypoint."""
-    service = create_service_from_env()
-    serve(service)
+    """Configure the process log, then load and serve the configured checkpoint.
+
+    The log is configured before the checkpoint loads, so the records of a
+    download or a load reach it too.
+    """
+    config = InferenceServiceConfig.from_env()
+    configure_logging(config.log_dir)
+    serve(create_service(config))

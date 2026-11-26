@@ -37,6 +37,7 @@ from jointfm_inference.model.service.config import (
     CHECKPOINT_TOKEN_ENV,
     CHECKPOINT_URL_ENV,
     CHECKPOINT_VERSION_ENV,
+    LOG_DIR_ENV,
     MAX_CONCURRENT_REQUESTS_ENV,
     MAX_REQUEST_BYTES_ENV,
     PRECISION_ENV,
@@ -91,6 +92,7 @@ def test_from_env_applies_the_defaults_of_every_optional_setting(
     assert config.checkpoint_sha256 is None
     assert config.checkpoint_token is None
     assert config.max_request_bytes is None
+    assert config.log_dir is None
 
 
 def test_from_env_requires_the_checkpoint_path(
@@ -266,6 +268,14 @@ def test_from_env_treats_an_empty_max_request_bytes_as_unset(
 ) -> None:
     monkeypatch.setenv(MAX_REQUEST_BYTES_ENV, "")
     assert InferenceServiceConfig.from_env().max_request_bytes is None
+
+
+def test_from_env_treats_an_empty_log_dir_as_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty log directory turns the log file off, as its unset default does."""
+    monkeypatch.setenv(LOG_DIR_ENV, "")
+    assert InferenceServiceConfig.from_env().log_dir is None
 
 
 @pytest.mark.parametrize("raw_value", ["0", "-1", "lots"])

@@ -477,7 +477,7 @@ tasks:
       fi
 
   docker:run:
-    desc: "Run the container image on the checkpoint that .env configures, mounting its directory at /models; extra docker run options go after -- (task docker:run -- --gpus all)"
+    desc: "Run the container image on the checkpoint that .env configures, mounting its directory at /models and a log directory at /logs; extra docker run options go after -- (task docker:run -- --gpus all)"
     dotenv: [.env]
     preconditions:
       - sh: command -v docker >/dev/null 2>&1
@@ -499,6 +499,12 @@ tasks:
       for NAME in $(env | sed -n 's/^\(JOINTFM_INFERENCE_[A-Z0-9_]*\)=.*/\1/p'); do
         set -- "$@" --env "$NAME"
       done
+      # The container writes its log file into the host directory .env names.
+      if [ -n "${JOINTFM_INFERENCE_LOG_DIR:-}" ]; then
+        mkdir -p "$JOINTFM_INFERENCE_LOG_DIR"
+        LOG_DIR="$(cd "$JOINTFM_INFERENCE_LOG_DIR" && pwd)"
+        set -- "$@" --env JOINTFM_INFERENCE_LOG_DIR=/logs --volume "$LOG_DIR:/logs"
+      fi
       # The container always listens on 8080 at every address; .env's bind
       # host and port choose where the host publishes it.
       if docker run --rm \

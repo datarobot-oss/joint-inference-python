@@ -151,6 +151,7 @@ def _every_setting() -> ServiceSettings:
         max_concurrent_requests=2,
         max_request_bytes=4096,
         model_version="model-1",
+        log_dir="/logs",
     )
 
 
