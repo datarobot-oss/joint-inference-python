@@ -144,7 +144,7 @@ def service_and_model(
     model = tiny_model()
     forward = FixedParameterForward(params or parameters())
     # An instance attribute shadows the class forward for this network only.
-    model.forward = forward  # ty: ignore[invalid-assignment]
+    model.forward = forward
     return _mount(model), forward
 
 

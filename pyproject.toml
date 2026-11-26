@@ -117,4 +117,4 @@ exclude = ["build/", "dist/"]
 # module that defines `forward` as a method trips this rule.
 [[tool.ty.overrides]]
 include = ["src/jointfm_inference/model/jointfm_1/**"]
-rules = { invalid-mutable-override = "ignore" }
+rules = { incompatible-mutable-override = "ignore" }

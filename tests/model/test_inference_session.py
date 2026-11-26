@@ -92,7 +92,7 @@ class _RecordingForward:
 def _recorded_model() -> tuple[JointFM, _RecordingForward]:
     model = tiny_model()
     recorder = _RecordingForward(model)
-    model.forward = recorder  # ty: ignore[invalid-assignment]
+    model.forward = recorder
     return model, recorder
 
 

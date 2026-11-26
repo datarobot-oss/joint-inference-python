@@ -144,7 +144,7 @@ def test_the_distribution_is_the_doubled_mixture_of_both_forwards() -> None:
     past, horizons, _ = _inputs()
     model = _model(symmetric=True)
     forward = _CountingForward(model)
-    model.forward = forward  # ty: ignore[invalid-assignment]
+    model.forward = forward
 
     params = _predict(model, past).params
     with torch.no_grad():
@@ -213,7 +213,7 @@ def test_switched_off_the_backend_predicts_with_the_plain_forward() -> None:
     past, horizons, _ = _inputs()
     model = _model(symmetric=False)
     forward = _CountingForward(model)
-    model.forward = forward  # ty: ignore[invalid-assignment]
+    model.forward = forward
 
     adapter = _predict(model, past)
     with torch.no_grad():
