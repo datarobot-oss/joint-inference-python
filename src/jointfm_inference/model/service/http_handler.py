@@ -14,7 +14,12 @@
 
 """HTTP request handler bound to a configured :class:`JointFMHTTPService`.
 
-The handler bounds what one connection can cost: a body above the service's
+The handler is the service's error boundary: a ``ServiceError`` answers with
+its own code, status, and message, and any other exception is a server failure
+that is logged with its traceback and answered by a generic 500 naming only a
+reference to that log record.
+
+It also bounds what one connection can cost: a body above the service's
 ``max_request_bytes`` is refused from its ``Content-Length`` before any of it
 is read, and a connection that sends or accepts no byte for
 ``REQUEST_TIMEOUT_SECONDS`` is dropped, a stalled request body with a 408.
@@ -23,6 +28,8 @@ is read, and a connection that sends or accepts no byte for
 from __future__ import annotations
 
 import json
+import logging
+import uuid
 from collections.abc import Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -37,6 +44,8 @@ from .errors import ServiceError
 from .http_service import JointFMHTTPService
 from .serialization import encode_response
 from .validation import _require_mapping
+
+logger = logging.getLogger(__name__)
 
 
 class JointFMRequestHandler(BaseHTTPRequestHandler):
@@ -54,7 +63,12 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
                 message=f"Unknown endpoint: {self.path}",
             )
             return
-        self._send_json(HTTPStatus.OK, _service(self).health_payload())
+        try:
+            health = _service(self).health_payload()
+        except Exception as error:  # the service's error boundary
+            self._send_internal_error(error)
+            return
+        self._send_json(HTTPStatus.OK, health)
 
     def do_POST(self) -> None:  # noqa: N802
         """Serve one prediction request from the packaged inference transport."""
@@ -79,12 +93,8 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
                 values=error.values,
             )
             return
-        except Exception as error:  # pragma: no cover - defensive HTTP boundary
-            self._send_error(
-                status=HTTPStatus.INTERNAL_SERVER_ERROR,
-                code="INTERNAL_ERROR",
-                message=str(error),
-            )
+        except Exception as error:  # the service's error boundary
+            self._send_internal_error(error)
             return
 
         self._send_body(HTTPStatus.OK, response_body)
@@ -165,6 +175,27 @@ class JointFMRequestHandler(BaseHTTPRequestHandler):
                 status=HTTPStatus.BAD_REQUEST,
                 field="request",
             ) from error
+
+    def _send_internal_error(self, error: Exception) -> None:
+        """Log one server failure with its traceback and answer a generic 500.
+
+        The exception's message can name file paths, devices, or memory
+        state, so it goes to the log only. The response carries a fresh
+        reference that the log record repeats, so an operator finds the
+        traceback a caller reports.
+        """
+        reference = uuid.uuid4().hex
+        logger.error(
+            "unexpected error answering %s (reference %s)",
+            self.path,
+            reference,
+            exc_info=error,
+        )
+        self._send_error(
+            status=HTTPStatus.INTERNAL_SERVER_ERROR,
+            code="INTERNAL_ERROR",
+            message=f"internal server error (reference {reference})",
+        )
 
     def _send_error(
         self,

@@ -145,6 +145,7 @@ With `JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS` above 1, each concurrent reques
 | `JOINTFM_INFERENCE_MAX_REQUEST_BYTES` | admits a request at every limit of the checkpoint's capacity envelope | Largest request body read, which `/healthz` reports as `max_request_bytes`; a larger one is refused unread with HTTP 413 and `INPUT_SIZE_EXCEEDED`. The default budgets each value at full float64 precision keyed by a column name of up to 64 bytes, so raise it for longer names |
 | `JOINTFM_INFERENCE_MAX_CONCURRENT_REQUESTS` | `1` | Prediction requests run at the same time; raise it only as far as the largest requests fit the device together |
 | `JOINTFM_INFERENCE_MODEL_VERSION` | `jointfm-inference:<version>+ckpt.<checkpoint version>` | Model version `/healthz` reports; a request that names a model version must match it |
+| `JOINTFM_INFERENCE_LOG_DIR` | unset | Directory, created if missing, of the log file `jointfm-inference.log`, which rolls over at 32 MiB and keeps 3 files; the log always goes to stderr as well |
 
 A connection that sends or accepts no byte for 60 seconds is closed, a stalled request body with HTTP 408, so a stalled client cannot hold a server thread.
 
@@ -156,6 +157,8 @@ A connection that sends or accepts no byte for 60 seconds is closed, a stalled r
 
 The service answers `GET /healthz` and `POST /predict`. [openapi.json](https://github.com/datarobot-oss/joint-inference-python/blob/main/src/jointfm_inference/model/service/wire_schema/openapi.json) is their [OpenAPI 3.1](https://spec.openapis.org/oas/v3.1.0) document: every request, response, health, and error field with its type and meaning, and one example request per query mode and return mode. The service's own code generates it, so it cannot drift from what the service accepts and sends: `jointfm-inference schema` writes it, a commit hook rewrites a stale copy and stops the commit until the rewritten one is staged, and the package ships it as data, so every release tag carries the document of the contract that release serves. Its `info.version` is the `schema_version` every prediction request sends.
 
+A failure of the service itself is answered with HTTP 500 and `INTERNAL_ERROR`, whose message names only a reference: the failure's own message can name files, devices, or memory state, so it goes with its traceback to the service's log, under that reference.
+
 ## Container
 
 `task docker:build` builds `jointfm-inference:<project version>` from [container/Dockerfile](https://github.com/datarobot-oss/joint-inference-python/blob/main/container/Dockerfile). The image holds the package and its dependencies, never weights: its command is `jointfm-inference serve`, it listens on port 8080, and it expects the checkpoint at `/models/jointfm.pt` unless `JOINTFM_INFERENCE_CHECKPOINT_PATH` says otherwise. `/models` is a volume, so mount a directory there that holds the checkpoint, or one the container may download it into:
@@ -164,7 +167,7 @@ The service answers `GET /healthz` and `POST /predict`. [openapi.json](https://g
 docker run --rm -p 8080:8080 -v "$PWD/models:/models" jointfm-inference:<version>
 ```
 
-`task docker:run` does this from `.env`: it passes every `JOINTFM_INFERENCE_*` setting on to the container, mounts the directory of `JOINTFM_INFERENCE_CHECKPOINT_PATH` at `/models`, runs as the calling user so a downloaded file belongs to them, and publishes the container's port 8080 at `.env`'s bind host and port. Options after `--` reach `docker run`, such as `task docker:run -- --gpus all` together with `JOINTFM_INFERENCE_DEVICE=cuda`.
+`task docker:run` does this from `.env`: it passes every `JOINTFM_INFERENCE_*` setting on to the container, mounts the directory of `JOINTFM_INFERENCE_CHECKPOINT_PATH` at `/models` and a set `JOINTFM_INFERENCE_LOG_DIR` at `/logs`, runs as the calling user so a downloaded file belongs to them, and publishes the container's port 8080 at `.env`'s bind host and port. Options after `--` reach `docker run`, such as `task docker:run -- --gpus all` together with `JOINTFM_INFERENCE_DEVICE=cuda`.
 
 ## Releases
 

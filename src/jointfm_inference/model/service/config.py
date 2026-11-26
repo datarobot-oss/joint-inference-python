@@ -47,6 +47,7 @@ from jointfm_inference.service_settings import (
     CHECKPOINT_URL_ENV,
     CHECKPOINT_VERSION_ENV,
     DEVICE_ENV,
+    LOG_DIR_ENV,
     MAP_LOCATION_ENV,
     MAX_CONCURRENT_REQUESTS_ENV,
     MAX_REQUEST_BYTES_ENV,
@@ -108,6 +109,7 @@ class InferenceServiceConfig:
         checkpoint_url: str | None = None,
         checkpoint_sha256: str | None = None,
         checkpoint_token: str | None = None,
+        log_dir: str | None = None,
     ) -> None:
         """Store validated runtime settings of one inference service process.
 
@@ -121,7 +123,9 @@ class InferenceServiceConfig:
         (``JOINTFM_INFERENCE_MAX_REQUEST_BYTES``) is the largest request body
         the service reads; ``None`` lets the service apply
         :func:`default_max_request_bytes` to the capacity envelope of the
-        checkpoint it loads.
+        checkpoint it loads. ``log_dir`` (``JOINTFM_INFERENCE_LOG_DIR``) is
+        the directory of the process's rolling log file; ``None`` writes no
+        file, and stderr alone carries the log.
         """
         self.checkpoint_path = checkpoint_path
         self.checkpoint_version = checkpoint_version
@@ -139,6 +143,7 @@ class InferenceServiceConfig:
         self.checkpoint_url = checkpoint_url
         self.checkpoint_sha256 = checkpoint_sha256
         self.checkpoint_token = checkpoint_token
+        self.log_dir = log_dir
 
     @classmethod
     def from_env(cls) -> "InferenceServiceConfig":
@@ -212,6 +217,7 @@ class InferenceServiceConfig:
             checkpoint_url=checkpoint_url,
             checkpoint_sha256=checkpoint_sha256,
             checkpoint_token=checkpoint_token,
+            log_dir=_optional_env(LOG_DIR_ENV),
         )
 
 

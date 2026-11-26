@@ -42,6 +42,7 @@ MAX_SAMPLE_COUNT_ENV = f"{ENV_PREFIX}MAX_SAMPLE_COUNT"
 MAX_CONCURRENT_REQUESTS_ENV = f"{ENV_PREFIX}MAX_CONCURRENT_REQUESTS"
 MAX_REQUEST_BYTES_ENV = f"{ENV_PREFIX}MAX_REQUEST_BYTES"
 MODEL_VERSION_ENV = f"{ENV_PREFIX}MODEL_VERSION"
+LOG_DIR_ENV = f"{ENV_PREFIX}LOG_DIR"
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class ServiceSettings:
     max_concurrent_requests: int | None = None
     max_request_bytes: int | None = None
     model_version: str | None = None
+    log_dir: str | os.PathLike[str] | None = None
 
     def environment(self) -> dict[str, str]:
         """Return the ``JOINTFM_INFERENCE_*`` variables that the set fields stand for."""
@@ -89,6 +91,7 @@ class ServiceSettings:
             MAX_CONCURRENT_REQUESTS_ENV: self.max_concurrent_requests,
             MAX_REQUEST_BYTES_ENV: self.max_request_bytes,
             MODEL_VERSION_ENV: self.model_version,
+            LOG_DIR_ENV: self.log_dir,
         }
         return {
             name: str(value) for name, value in variables.items() if value is not None

@@ -16,9 +16,11 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 import time
+from collections.abc import Callable
 from http import HTTPStatus
 from io import BytesIO
 from pathlib import Path
@@ -65,8 +67,12 @@ from jointfm_inference.model.service.validation import (
 )
 from tests.support.http_handler import (
     GENEROUS_REQUEST_CAP,
+    HANDLER_LOGGER,
+    INTERNAL_DETAIL,
     FakeHTTPHandler,
     capped_service,
+    failing_handler,
+    internal_error_reference,
     response_body,
 )
 from tests.support.models import tiny_model, write_checkpoint
@@ -484,6 +490,48 @@ def test_request_handler_dispatches_service_errors() -> None:
     assert response_body(handler)["errors"][0]["field"] == "value"
 
 
+@pytest.mark.parametrize(
+    ("handle", "path", "failing_call"),
+    [
+        (FakeHTTPHandler.do_POST, "/predict", "predict_response_bytes"),
+        (FakeHTTPHandler.do_GET, "/healthz", "health_payload"),
+    ],
+    ids=["predict", "health"],
+)
+def test_an_unexpected_error_is_logged_with_its_traceback_and_answered_generically(
+    caplog: pytest.LogCaptureFixture,
+    handle: Callable[[FakeHTTPHandler], None],
+    path: str,
+    failing_call: str,
+) -> None:
+    """A server failure reaches the log with its traceback and the caller only a reference."""
+    handler = failing_handler(path, failing_call)
+
+    with caplog.at_level(logging.ERROR, logger=HANDLER_LOGGER):
+        handle(handler)
+
+    reference = internal_error_reference(handler)
+    [record] = [r for r in caplog.records if r.name == HANDLER_LOGGER]
+    assert record.levelno == logging.ERROR
+    assert reference in record.getMessage()
+    assert path in record.getMessage()
+    assert isinstance(record.exc_info, tuple)
+    exc_type, exc_value, _traceback = record.exc_info
+    assert exc_type is RuntimeError
+    assert str(exc_value) == INTERNAL_DETAIL
+
+
+def test_each_server_failure_gets_its_own_reference() -> None:
+    """Two failures answer two references, so an operator can tell their tracebacks apart."""
+    references = set()
+    for _ in range(2):
+        handler = failing_handler("/predict", "predict_response_bytes")
+        handler.do_POST()
+        references.add(internal_error_reference(handler))
+
+    assert len(references) == 2
+
+
 def test_handler_class_binds_the_service_and_an_unbound_handler_fails() -> None:
     bound = _handler_class(cast(JointFMHTTPService, SimpleNamespace()))
     handler = FakeHTTPHandler()
@@ -781,22 +829,33 @@ def test_extra_caller_blocks_until_an_in_flight_slot_is_released() -> None:
     assert not waiter.is_alive()
 
 
-def test_server_main_creates_service_and_serves(
+def test_server_main_configures_logging_before_it_loads_and_serves(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The log is in place before the checkpoint loads, so startup records reach it."""
     events: list[object] = []
+    config = make_service_config(log_dir="logs")
     sentinel = object()
 
-    def fake_create_service_from_env() -> object:
-        events.append("created")
+    def config_from_env(cls: type[InferenceServiceConfig]) -> InferenceServiceConfig:
+        del cls
+        return config
+
+    def fake_configure_logging(log_dir: str | None) -> None:
+        events.append(("logging", log_dir))
+
+    def fake_create_service(created_from: InferenceServiceConfig) -> object:
+        events.append(("created", created_from))
         return sentinel
 
     def fake_serve(service: object) -> None:
         events.append(service)
 
     monkeypatch.setattr(
-        service_server, "create_service_from_env", fake_create_service_from_env
+        InferenceServiceConfig, "from_env", classmethod(config_from_env)
     )
+    monkeypatch.setattr(service_server, "configure_logging", fake_configure_logging)
+    monkeypatch.setattr(service_server, "create_service", fake_create_service)
     monkeypatch.setattr(service_server, "serve", fake_serve)
     service_server.main()
-    assert events == ["created", sentinel]
+    assert events == [("logging", "logs"), ("created", config), sentinel]
